@@ -834,6 +834,7 @@ public class InsuranceSeizureApp : Application
     private DateTime? processingDate = null;
     private bool isFromFileSearch = false;
     private bool suppressSheetChange = false;
+    private DateTime? currentContractDate = null;        // 差押文言用の契約年月日
 
     // --- キャッシュ済みブラシ（アンバー #E69500 ベース） ---
     private static readonly SolidColorBrush BrushBorderNormal    = Frozen(new SolidColorBrush((Color)ColorConverter.ConvertFromString("#D0D0D0")));
@@ -1615,6 +1616,7 @@ public class InsuranceSeizureApp : Application
         txtPolicyNumber.Text = (d.PolicyNumber ?? "").Trim();
         txtContractType.Text = (d.ContractType ?? "").Trim();
         txtContractDate.Text = (d.ContractDate ?? "").Trim();
+        currentContractDate = d.ContractDateParsed;
         txtMaturityDate.Text = (d.MaturityDate ?? "").Trim();
         txtPremium.Text = (d.PremiumDisplay ?? "").Trim();
         txtInsuredName.Text = (d.InsuredName ?? "").Trim();
@@ -1739,11 +1741,245 @@ public class InsuranceSeizureApp : Application
         FadeInOverlay();
     }
 
-    // Phase 4 で実装: 一覧に追加
+    // ==============================================================
+    // 処理実行（一覧に追加・スキップ）
+    // ==============================================================
+
+    // 「一覧に追加」ボタン押下時の処理
+    // バリデーション → UI入力値をDictionaryに収集 → BackgroundWorkerで非同期処理
     private void ExecuteAdd()
     {
-        // TODO: Phase 4
-        CrossFadeToResult("error", "未実装", "Phase 4 で実装予定です");
+        if (!processingDate.HasValue) return;
+
+        // 届出住所50文字チェック（チェックONの場合のみ）
+        if (chkDeliveryOutput.IsChecked == true)
+        {
+            string deliveryFull = "（届出：" + txtDeliveryAddr.Text.Trim() + "）";
+            if (deliveryFull.Length > 50)
+            { deliveryError.Visibility = Visibility.Visible; return; }
+        }
+
+        // オーバーレイ表示（処理中スピナー）
+        loadingOverlay.Visibility = Visibility.Visible;
+        resultOverlay.Visibility = Visibility.Collapsed;
+        FadeInOverlay();
+
+        // UI入力値をDictionaryに収集（BackgroundWorkerに渡すため）
+        string deliveryAddr = (chkDeliveryOutput.IsChecked == true)
+            ? "（届出：" + txtDeliveryAddr.Text.Trim() + "）" : "";
+        var addData = new Dictionary<string, string>
+        {
+            { "addressNum",    txtAddressNum.Text.Trim() },
+            { "name",          txtName.Text.Trim() },
+            { "staff",         txtStaff.Text.Trim() },
+            { "institution",   txtInstitution.Text.Trim() },
+            { "residenceAddr", txtResidenceAddr.Text.Trim() },
+            { "deliveryAddr",  deliveryAddr },
+            { "execDate",      BusinessLogic.DateToWareki(processingDate.Value, eraMapping) },
+            { "policyNumber",  txtPolicyNumber.Text.Trim() },
+            { "contractType",  txtContractType.Text.Trim() },
+            { "insuredName",   txtInsuredName.Text.Trim() },
+            { "filePath",      currentFilePath },
+            { "fileName",      System.IO.Path.GetFileName(currentFilePath) }
+        };
+        var contractDate = currentContractDate;
+
+        var worker = new BackgroundWorker();
+        worker.DoWork += delegate(object s, DoWorkEventArgs args)
+        {
+            args.Result = ProcessAdd(addData, contractDate);
+        };
+        worker.RunWorkerCompleted += delegate(object s, RunWorkerCompletedEventArgs args)
+        {
+            if (args.Error != null)
+            { CrossFadeToResult("error", "処理失敗", args.Error.Message); return; }
+            var result = args.Result as Dictionary<string, string>;
+            if (result["status"] == "ok")
+            {
+                fileEntries[currentFileIndex].State = FileProcessState.Added;
+                CrossFadeToResult("success", "一覧に追加しました",
+                    "文書番号: " + result["docNumber"]);
+            }
+            else
+            { CrossFadeToResult("error", "処理失敗", result["message"]); }
+        };
+        worker.RunWorkerAsync();
+    }
+
+    // 一覧への追加処理を実行する（BackgroundWorker から呼ばれる）
+    // 処理フロー:
+    //   1. 文書番号の排他ロック採番
+    //   2. 差押文言6フィールドの生成
+    //   3. CSV行の構築（21列、RFC 4180準拠エスケープ）
+    //   4. CSV追記（排他ロック付き FileStream、リトライ最大5回）
+    //   5. 印刷用ファイル保存
+    private Dictionary<string, string> ProcessAdd(
+        Dictionary<string, string> addData, DateTime? contractDate)
+    {
+        var result = new Dictionary<string, string>();
+
+        // 1. 文書番号の排他ロック採番
+        string docNumber;
+        if (!AllocateDocNumber(out docNumber))
+        {
+            result["status"] = "error";
+            result["message"] = "文書番号の取得に失敗";
+            return result;
+        }
+
+        // 2. 差押文言の生成
+        var seizureText = GenerateSeizureText(
+            addData["institution"], addData["contractType"],
+            addData["policyNumber"], contractDate,
+            addData["name"], addData["insuredName"]);
+
+        // 3. CSV行の構築（21列）
+        string printFileName = docNumber + ".xlsm";
+        var csvFields = new[]
+        {
+            DateTime.Now.ToString("yyyy/MM/dd HH:mm:ss"),  // 登録日時
+            addData["addressNum"],                           // 宛名番号
+            addData["name"],                                 // 氏名
+            addData["staff"],                                // 職員名
+            addData["execDate"],                             // 執行日（7桁和暦）
+            addData["residenceAddr"],                        // 住民票住所
+            addData["deliveryAddr"],                          // 届出住所
+            addData["institution"],                           // 保険会社名
+            addData["policyNumber"],                          // 証券番号
+            addData["contractType"],                          // 契約種類
+            seizureText["Line1"],                             // 差押文言1（宣言文）
+            seizureText["Line2"],                             // 差押文言2（保険の種類）
+            seizureText["Line3"],                             // 差押文言3（証券番号）
+            seizureText["Line4"],                             // 差押文言4（契約年月日）
+            seizureText["Line5"],                             // 差押文言5（契約者）
+            seizureText["Line6"],                             // 差押文言6（被保険者）
+            docNumber,                                        // 文書番号
+            printFileName,                                    // 照会結果ファイル名
+            "",                                               // 処理済フラグ1
+            "",                                               // 処理済フラグ2
+            ""                                                // 処理済フラグ3
+        };
+        string csvLine = string.Join(",", csvFields.Select(f => BusinessLogic.CsvEscape(f)));
+
+        // 4. CSV追記
+        string csvPath = System.IO.Path.Combine(activeProfile.OutputFolder, CSV_FILENAME);
+        if (!WriteCsvLine(csvPath, csvLine))
+        {
+            RollbackDocNumber();
+            result["status"] = "error";
+            result["message"] = "CSV書き込み失敗";
+            return result;
+        }
+
+        // 5. 印刷用ファイル保存
+        string printFilePath = System.IO.Path.Combine(activeProfile.PrintFolder, printFileName);
+        SavePrintFile(addData["filePath"], printFilePath);
+
+        result["status"] = "ok";
+        result["docNumber"] = docNumber;
+        return result;
+    }
+
+    // ==============================================================
+    // 差押文言生成
+    // ==============================================================
+
+    // 契約情報から差押文言6フィールドを生成する
+    //
+    // Line1: 宣言文（保険会社名を全角で埋め込み）
+    // Line2: 保険の種類（契約種類を全角変換）
+    // Line3: 証券番号（全角変換）
+    // Line4: 保険契約年月日（和暦全角、ゼロ埋めなし）
+    // Line5: 契約者名
+    // Line6: 被保険者名
+    private Dictionary<string, string> GenerateSeizureText(
+        string institutionName, string contractType,
+        string policyNumber, DateTime? contractDate,
+        string contractorName, string insuredName)
+    {
+        string normalizedInst = BusinessLogic.ToFullWidth((institutionName ?? "").Trim());
+
+        string line1 = "\u3000上記滞納者が、債務者である" + normalizedInst
+            + "に対して有する下記生命保険契約に基づく一切の支払請求権。"
+            + "なお、保険事故発生又は契約期間の終了しないうちに解約されたときは"
+            + "解約返戻金全額の支払請求権。";
+
+        string line2 = BusinessLogic.ToFullWidth((contractType ?? "").Trim());
+        string line3 = BusinessLogic.ToFullWidth((policyNumber ?? "").Trim());
+        string line4 = contractDate.HasValue
+            ? BusinessLogic.FormatWarekiDisplay(contractDate.Value, eraMapping) : "";
+        string line5 = (contractorName ?? "").Trim();
+        string line6 = (insuredName ?? "").Trim();
+
+        return new Dictionary<string, string>
+        {
+            { "Line1", line1 }, { "Line2", line2 }, { "Line3", line3 },
+            { "Line4", line4 }, { "Line5", line5 }, { "Line6", line6 }
+        };
+    }
+
+    // ==============================================================
+    // 印刷用ファイル保存
+    // ==============================================================
+
+    // 印刷用ファイルを保存する
+    // 元ファイルを SaveAs で複製し、選択シート以外を削除（VeryHidden は保持）
+    private void SavePrintFile(string sourcePath, string destPath)
+    {
+        if (destPath.Length > MAX_PATH) return;
+        var destDir = System.IO.Path.GetDirectoryName(destPath);
+        if (!Directory.Exists(destDir)) Directory.CreateDirectory(destDir);
+
+        dynamic printWorkbook = null;
+        try
+        {
+            excel.Visible = false;
+            printWorkbook = excel.Workbooks.Open(sourcePath, 0, false); // 読み書き可能
+
+            // SaveAs 前にブック保護を解除
+            try { if ((bool)printWorkbook.ProtectStructure) printWorkbook.Unprotect(); } catch { }
+
+            // SaveAs（xlOpenXMLWorkbookMacroEnabled = 52）
+            excel.DisplayAlerts = false;
+            printWorkbook.SaveAs(destPath, 52);
+            excel.DisplayAlerts = true;
+
+            try { if ((bool)printWorkbook.ProtectStructure) printWorkbook.Unprotect(); } catch { }
+
+            // 選択シート以外を削除（VeryHidden シートは残す）
+            excel.DisplayAlerts = false;
+            for (int i = (int)printWorkbook.Worksheets.Count; i >= 1; i--)
+            {
+                dynamic ws = printWorkbook.Worksheets[i];
+                try
+                {
+                    // VeryHidden（Visible=2）以外で、選択シート名と異なるシートを削除
+                    if ((int)ws.Visible != 2 && (string)ws.Name != selectedSheetName)
+                        ws.Delete();
+                }
+                catch { }
+            }
+            excel.DisplayAlerts = true;
+
+            // 表示位置を A1・スクロール先頭にリセット
+            try
+            {
+                dynamic ps = printWorkbook.Worksheets[selectedSheetName];
+                ps.Activate();
+                printWorkbook.Application.ActiveWindow.ScrollRow = 1;
+                printWorkbook.Application.ActiveWindow.ScrollColumn = 1;
+                ps.Range["A1"].Select();
+            }
+            catch { }
+
+            printWorkbook.Save();
+        }
+        catch { }
+        finally
+        {
+            if (printWorkbook != null)
+                try { printWorkbook.Close(false); } catch { }
+        }
     }
 
     // ==============================================================
