@@ -880,7 +880,7 @@ public class InsuranceSeizureApp : Application
     private TextBlock txtContractExists, txtContractStatus, txtPolicyNumber;
     private TextBlock txtContractType, txtContractDate, txtMaturityDate;
     private TextBlock txtPremium, txtInsuredName, txtSeizureRights;
-    private Border warningBanner;
+    private FrameworkElement warningBanner;
     private TextBlock warningIcon, warningText;
     // 金額情報テキスト
     private TextBlock txtSurrenderValue, txtNetValue;
@@ -1023,7 +1023,7 @@ public class InsuranceSeizureApp : Application
         txtPremium = (TextBlock)window.FindName("TxtPremium");
         txtInsuredName = (TextBlock)window.FindName("TxtInsuredName");
         txtSeizureRights = (TextBlock)window.FindName("TxtSeizureRights");
-        warningBanner = (Border)window.FindName("WarningBanner");
+        warningBanner = (FrameworkElement)window.FindName("WarningBanner");
         warningIcon = (TextBlock)window.FindName("WarningIcon");
         warningText = (TextBlock)window.FindName("WarningText");
         // 金額情報
@@ -1666,23 +1666,15 @@ public class InsuranceSeizureApp : Application
         if (contractExists == "無")
         {
             // エラーレベル: 保険契約なし
-            warningBanner.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FCEBEB"));
-            warningBanner.BorderBrush = BrushValidationError;
-            warningBanner.BorderThickness = new Thickness(1);
             warningIcon.Text = "\u2717"; warningIcon.Foreground = BrushValidationError;
-            warningText.Text = "保険契約がありません \u2014 スキップを推奨します";
-            warningText.Foreground = BrushValidationError;
+            warningText.Text = "保険契約がありません"; warningText.Foreground = BrushValidationError;
             warningBanner.Visibility = Visibility.Visible;
         }
         else if (seizureRights.Contains("有"))
         {
             // 注意レベル: 差押権利者あり
-            warningBanner.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFF3E0"));
-            warningBanner.BorderBrush = BrushAccent;
-            warningBanner.BorderThickness = new Thickness(1);
             warningIcon.Text = "\u26A0"; warningIcon.Foreground = BrushWarningText;
-            warningText.Text = "差押権利者が存在します \u2014 差押えの可否を確認してください";
-            warningText.Foreground = BrushWarningText;
+            warningText.Text = "差押権利者が存在します"; warningText.Foreground = BrushWarningText;
             warningBanner.Visibility = Visibility.Visible;
         }
         else
@@ -2098,7 +2090,7 @@ public class InsuranceSeizureApp : Application
         string xaml = @"
 <Window xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'
     xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml'
-    Title='生命保険差押予定一覧 作成ツール' Width='1100' Height='700' MinWidth='1000' MinHeight='520'
+    Title='生命保険差押予定一覧 作成ツール' Width='1000' Height='700' MinWidth='900' MinHeight='520'
     WindowStartupLocation='CenterScreen' Background='#F9F9F9' FontFamily='Meiryo UI'
     UseLayoutRounding='True' SnapsToDevicePixels='True'>
 <Window.Resources>
@@ -2247,7 +2239,7 @@ public class InsuranceSeizureApp : Application
                             <TextBox x:Name='TxtAddressNum' IsReadOnly='True' Background='#F3F3F3' BorderBrush='#E8E8E8' FontFamily='Consolas' FontSize='12' Padding='5,4'/></StackPanel>
                         <StackPanel Grid.Column='2'><TextBlock FontSize='11' Foreground='#777' Margin='0,0,0,3'>氏名 &#x270E;</TextBlock>
                             <TextBox x:Name='TxtName' FontSize='12' Padding='5,4' BorderBrush='#D0D0D0'/></StackPanel></Grid>
-                    <Grid Grid.Row='0' Grid.Column='2'><Grid.ColumnDefinitions><ColumnDefinition Width='1.5*'/><ColumnDefinition Width='16'/><ColumnDefinition Width='*'/></Grid.ColumnDefinitions>
+                    <Grid Grid.Row='0' Grid.Column='2'><Grid.ColumnDefinitions><ColumnDefinition Width='2*'/><ColumnDefinition Width='16'/><ColumnDefinition Width='*'/></Grid.ColumnDefinitions>
                         <StackPanel><TextBlock Text='保険会社' FontSize='11' Foreground='#777' Margin='0,0,0,3'/>
                             <TextBox x:Name='TxtInstitution' IsReadOnly='True' Background='#F3F3F3' BorderBrush='#E8E8E8' FontSize='12' Padding='5,4'/></StackPanel>
                         <StackPanel Grid.Column='2'><TextBlock FontSize='11' Foreground='#777' Margin='0,0,0,3'>処分担当 &#x270E;</TextBlock>
@@ -2274,28 +2266,28 @@ public class InsuranceSeizureApp : Application
                 </Grid></StackPanel></Border>
             <!-- 契約情報 + 金額情報 -->
             <Grid Grid.Row='2'>
-                <Grid.ColumnDefinitions><ColumnDefinition Width='1.2*'/><ColumnDefinition Width='8'/><ColumnDefinition Width='*'/></Grid.ColumnDefinitions>
+                <Grid.ColumnDefinitions><ColumnDefinition Width='*'/><ColumnDefinition Width='8'/><ColumnDefinition Width='*'/></Grid.ColumnDefinitions>
                 <Border Grid.Column='0' Background='White' BorderBrush='#E0E0E0' BorderThickness='1' CornerRadius='6' Padding='14,12' Margin='0,0,0,10'>
                     <StackPanel>
-                        <TextBlock Text='&#x1F4CB; 契約情報' FontSize='13' Foreground='#E69500' FontWeight='Medium' Margin='0,0,0,8'/>
-                        <Border x:Name='WarningBanner' Visibility='Collapsed' CornerRadius='4' Padding='6,5' Margin='0,0,0,8'>
-                            <StackPanel Orientation='Horizontal'>
-                                <TextBlock x:Name='WarningIcon' FontSize='14' Margin='0,0,6,0'/>
-                                <TextBlock x:Name='WarningText' FontSize='11'/></StackPanel></Border>
+                        <DockPanel Margin='0,0,0,8'>
+                            <StackPanel x:Name='WarningBanner' DockPanel.Dock='Right' Orientation='Horizontal' Visibility='Collapsed'>
+                                <TextBlock x:Name='WarningIcon' FontSize='11' Margin='0,0,4,0'/>
+                                <TextBlock x:Name='WarningText' FontSize='11'/></StackPanel>
+                            <TextBlock Text='&#x1F4CB; 契約情報' FontSize='13' Foreground='#E69500' FontWeight='Medium'/></DockPanel>
                         <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock Text='保険契約の有無' Foreground='#777' FontSize='11'/>
                             <TextBlock x:Name='TxtContractExists' Foreground='#333' FontSize='11' FontWeight='Medium' HorizontalAlignment='Right'/></DockPanel></Border>
                         <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock Text='契約の状態' Foreground='#777' FontSize='11'/>
                             <TextBlock x:Name='TxtContractStatus' Foreground='#333' FontSize='11' HorizontalAlignment='Right'/></DockPanel></Border>
                         <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock Text='証券番号' Foreground='#777' FontSize='11'/>
-                            <TextBlock x:Name='TxtPolicyNumber' Foreground='#333' FontSize='11' FontFamily='Consolas' HorizontalAlignment='Right'/></DockPanel></Border>
+                            <TextBlock x:Name='TxtPolicyNumber' Foreground='#333' FontSize='11' HorizontalAlignment='Right'/></DockPanel></Border>
                         <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock Text='契約種類' Foreground='#777' FontSize='11'/>
-                            <TextBlock x:Name='TxtContractType' Foreground='#333' FontSize='10' HorizontalAlignment='Right' TextTrimming='CharacterEllipsis' MaxWidth='300'/></DockPanel></Border>
+                            <TextBlock x:Name='TxtContractType' Foreground='#333' FontSize='11' HorizontalAlignment='Right'/></DockPanel></Border>
                         <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock Text='契約年月日' Foreground='#777' FontSize='11'/>
                             <TextBlock x:Name='TxtContractDate' Foreground='#333' FontSize='11' HorizontalAlignment='Right'/></DockPanel></Border>
                         <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock Text='満期年月日' Foreground='#777' FontSize='11'/>
                             <TextBlock x:Name='TxtMaturityDate' Foreground='#333' FontSize='11' HorizontalAlignment='Right'/></DockPanel></Border>
                         <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock Text='保険料' Foreground='#777' FontSize='11'/>
-                            <TextBlock x:Name='TxtPremium' Foreground='#333' FontSize='11' FontFamily='Consolas' HorizontalAlignment='Right'/></DockPanel></Border>
+                            <TextBlock x:Name='TxtPremium' Foreground='#333' FontSize='11' HorizontalAlignment='Right'/></DockPanel></Border>
                         <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock Text='被保険者' Foreground='#777' FontSize='11'/>
                             <TextBlock x:Name='TxtInsuredName' Foreground='#333' FontSize='11' HorizontalAlignment='Right'/></DockPanel></Border>
                         <DockPanel Margin='0,4,0,0'><TextBlock Text='差押権利者' Foreground='#777' FontSize='11'/>
@@ -2306,20 +2298,20 @@ public class InsuranceSeizureApp : Application
                         <TextBlock DockPanel.Dock='Top' Text='&#x1F4B0; 金額情報' FontSize='13' Foreground='#E69500' FontWeight='Medium' Margin='0,0,0,8'/>
                         <Border DockPanel.Dock='Bottom' BorderBrush='#E69500' BorderThickness='0,2,0,0' Padding='0,6,0,0' Margin='0,6,0,0'>
                             <DockPanel><TextBlock Text='参考: 差引見込額' FontSize='11' Foreground='#777' VerticalAlignment='Center'/>
-                                <TextBlock x:Name='TxtNetValue' FontSize='13' Foreground='#E69500' FontWeight='Medium' FontFamily='Consolas' HorizontalAlignment='Right'/></DockPanel></Border>
+                                <TextBlock x:Name='TxtNetValue' FontSize='13' Foreground='#E69500' FontWeight='Medium' HorizontalAlignment='Right'/></DockPanel></Border>
                         <StackPanel>
                             <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock Text='解約返戻金' Foreground='#777' FontSize='11'/>
-                                <TextBlock x:Name='TxtSurrenderValue' Foreground='#333' FontSize='11' FontWeight='Medium' FontFamily='Consolas' HorizontalAlignment='Right'/></DockPanel></Border>
+                                <TextBlock x:Name='TxtSurrenderValue' Foreground='#333' FontSize='11' FontWeight='Medium' HorizontalAlignment='Right'/></DockPanel></Border>
                             <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock x:Name='LblDividend' Text='配当金' Foreground='#777' FontSize='11'/>
-                                <TextBlock x:Name='TxtDividend' Foreground='#333' FontSize='11' FontFamily='Consolas' HorizontalAlignment='Right'/></DockPanel></Border>
+                                <TextBlock x:Name='TxtDividend' Foreground='#333' FontSize='11' HorizontalAlignment='Right'/></DockPanel></Border>
                             <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock x:Name='LblLoan' Text='貸付金' Foreground='#777' FontSize='11'/>
-                                <TextBlock x:Name='TxtLoan' Foreground='#333' FontSize='11' FontFamily='Consolas' HorizontalAlignment='Right'/></DockPanel></Border>
+                                <TextBlock x:Name='TxtLoan' Foreground='#333' FontSize='11' HorizontalAlignment='Right'/></DockPanel></Border>
                             <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock x:Name='LblUnpaidPremium' Text='未払い保険料' Foreground='#777' FontSize='11'/>
-                                <TextBlock x:Name='TxtUnpaidPremium' Foreground='#333' FontSize='11' FontFamily='Consolas' HorizontalAlignment='Right'/></DockPanel></Border>
+                                <TextBlock x:Name='TxtUnpaidPremium' Foreground='#333' FontSize='11' HorizontalAlignment='Right'/></DockPanel></Border>
                             <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock x:Name='LblUnpaidInterest' Text='未払い利息' Foreground='#777' FontSize='11'/>
-                                <TextBlock x:Name='TxtUnpaidInterest' Foreground='#333' FontSize='11' FontFamily='Consolas' HorizontalAlignment='Right'/></DockPanel></Border>
+                                <TextBlock x:Name='TxtUnpaidInterest' Foreground='#333' FontSize='11' HorizontalAlignment='Right'/></DockPanel></Border>
                             <DockPanel Margin='0,4,0,0'><TextBlock x:Name='LblPrepaidPremium' Text='前払い保険料' Foreground='#777' FontSize='11'/>
-                                <TextBlock x:Name='TxtPrepaidPremium' Foreground='#333' FontSize='11' FontFamily='Consolas' HorizontalAlignment='Right'/></DockPanel>
+                                <TextBlock x:Name='TxtPrepaidPremium' Foreground='#333' FontSize='11' HorizontalAlignment='Right'/></DockPanel>
                         </StackPanel>
                     </DockPanel></Border>
             </Grid>
