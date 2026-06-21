@@ -844,10 +844,8 @@ public class InsuranceSeizureApp : Application
     private static readonly SolidColorBrush BrushIconBgError     = Frozen(new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FCEBEB")));
     private static readonly SolidColorBrush BrushIconBgSkip      = Frozen(new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFF3E0")));
     private static readonly SolidColorBrush BrushDetailMuted     = Frozen(new SolidColorBrush((Color)ColorConverter.ConvertFromString("#999")));
-    private static readonly SolidColorBrush BrushWarningBanner   = Frozen(new SolidColorBrush((Color)ColorConverter.ConvertFromString("#CC8400")));
-
-    // ブラシを Freeze して描画パフォーマンスを向上するヘルパー
-    private static SolidColorBrush Frozen(SolidColorBrush brush) { brush.Freeze(); return brush; }
+    private static readonly SolidColorBrush BrushWarningText     = Frozen(new SolidColorBrush((Color)ColorConverter.ConvertFromString("#CC8400")));
+    private static SolidColorBrush Frozen(SolidColorBrush b) { b.Freeze(); return b; }
 
     // --- 定数 ---
     private const int CSV_WRITE_MAX_RETRY = 5;
@@ -862,8 +860,39 @@ public class InsuranceSeizureApp : Application
     private const string DOC_NUMBER_FILE = "insurance_document_number_counter.json";
     private const string BULK_READ_END = "AN75";
 
-    // --- UI要素（Phase 2 で定義） ---
+    // --- UI要素 ---
     private Window window;
+    private Grid initialPanel, mainPanel, overlayPanel, loadingOverlay, resultOverlay;
+    private ComboBox sheetCombo;
+    private TextBlock fileLink, statusLeft, statusRight, guideText, deliveryError;
+    private TextBlock resultIcon, resultTitle, resultDetail, resultSub;
+    private Border resultIconBg;
+    private TextBox txtAddressNum, txtName, txtInstitution, txtStaff;
+    private TextBox txtResidenceAddr, txtDeliveryAddr, txtExecDate;
+    private CheckBox chkDeliveryOutput;
+    private Button btnAdd, btnSkip, btnLoadFile, resultButton;
+    private Button btnCalendar;
+    private Popup calendarPopup;
+    private System.Windows.Controls.Calendar dateCalendar;
+    private RotateTransform spinnerRotation;
+    // 契約情報テキスト
+    private TextBlock txtContractExists, txtContractStatus, txtPolicyNumber;
+    private TextBlock txtContractType, txtContractDate, txtMaturityDate;
+    private TextBlock txtPremium, txtInsuredName, txtSeizureRights;
+    private Border warningBanner;
+    private TextBlock warningIcon, warningText;
+    // 金額情報テキスト
+    private TextBlock txtSurrenderValue, txtNetValue;
+    private TextBlock lblDividend, txtDividend, lblLoan, txtLoan;
+    private TextBlock lblUnpaidPremium, txtUnpaidPremium;
+    private TextBlock lblUnpaidInterest, txtUnpaidInterest;
+    private TextBlock lblPrepaidPremium, txtPrepaidPremium;
+
+    // --- Excel COM ---
+    private dynamic excel;
+    private string currentFilePath;
+    private string selectedSheetName;
+    private string lastDocNumber;
 
     // ==============================================================
     // エントリポイント
@@ -908,51 +937,28 @@ public class InsuranceSeizureApp : Application
         activeProfile = config.Profiles[0];
 
         // --- プロファイルバリデーション ---
-        var validationErrors = new List<string>();
-        if (string.IsNullOrWhiteSpace(activeProfile.AddressNumberCell))
-            validationErrors.Add("addressNumberCell が未設定です");
-        if (string.IsNullOrWhiteSpace(activeProfile.NameCell))
-            validationErrors.Add("nameCell が未設定です");
-        if (string.IsNullOrWhiteSpace(activeProfile.StaffCell))
-            validationErrors.Add("staffCell が未設定です");
-        if (string.IsNullOrWhiteSpace(activeProfile.AddressCell))
-            validationErrors.Add("addressCell が未設定です");
-        if (string.IsNullOrWhiteSpace(activeProfile.InstitutionNameCell))
-            validationErrors.Add("institutionNameCell が未設定です");
-        if (string.IsNullOrWhiteSpace(activeProfile.PolicyNumberCell))
-            validationErrors.Add("policyNumberCell が未設定です");
-        if (string.IsNullOrWhiteSpace(activeProfile.SurrenderValueCell))
-            validationErrors.Add("surrenderValueCell が未設定です");
-        if (string.IsNullOrWhiteSpace(activeProfile.ContractExistsCell))
-            validationErrors.Add("contractExistsCell が未設定です");
-        if (string.IsNullOrWhiteSpace(activeProfile.OutputFolder))
-            validationErrors.Add("outputFolder が未設定です");
-        if (string.IsNullOrWhiteSpace(activeProfile.PrintFolder))
-            validationErrors.Add("printFolder が未設定です");
-        if (validationErrors.Count > 0)
-        {
-            MessageBox.Show("プロファイル設定エラー:\n\n" + string.Join("\n", validationErrors),
-                "設定エラー", MessageBoxButton.OK, MessageBoxImage.Error);
-            Shutdown(1);
-            return;
-        }
+        var ve = new List<string>();
+        if (string.IsNullOrWhiteSpace(activeProfile.AddressNumberCell)) ve.Add("addressNumberCell が未設定です");
+        if (string.IsNullOrWhiteSpace(activeProfile.NameCell)) ve.Add("nameCell が未設定です");
+        if (string.IsNullOrWhiteSpace(activeProfile.StaffCell)) ve.Add("staffCell が未設定です");
+        if (string.IsNullOrWhiteSpace(activeProfile.AddressCell)) ve.Add("addressCell が未設定です");
+        if (string.IsNullOrWhiteSpace(activeProfile.InstitutionNameCell)) ve.Add("institutionNameCell が未設定です");
+        if (string.IsNullOrWhiteSpace(activeProfile.PolicyNumberCell)) ve.Add("policyNumberCell が未設定です");
+        if (string.IsNullOrWhiteSpace(activeProfile.SurrenderValueCell)) ve.Add("surrenderValueCell が未設定です");
+        if (string.IsNullOrWhiteSpace(activeProfile.ContractExistsCell)) ve.Add("contractExistsCell が未設定です");
+        if (string.IsNullOrWhiteSpace(activeProfile.OutputFolder)) ve.Add("outputFolder が未設定です");
+        if (string.IsNullOrWhiteSpace(activeProfile.PrintFolder)) ve.Add("printFolder が未設定です");
+        if (ve.Count > 0)
+        { MessageBox.Show("プロファイル設定エラー:\n\n" + string.Join("\n", ve), "設定エラー", MessageBoxButton.OK, MessageBoxImage.Error); Shutdown(1); return; }
 
         // --- 出力先フォルダの自動作成 ---
         try
         {
-            if (!Directory.Exists(activeProfile.OutputFolder))
-                Directory.CreateDirectory(activeProfile.OutputFolder);
-            if (!Directory.Exists(activeProfile.PrintFolder))
-                Directory.CreateDirectory(activeProfile.PrintFolder);
+            if (!Directory.Exists(activeProfile.OutputFolder)) Directory.CreateDirectory(activeProfile.OutputFolder);
+            if (!Directory.Exists(activeProfile.PrintFolder))  Directory.CreateDirectory(activeProfile.PrintFolder);
         }
         catch (Exception dirEx)
-        {
-            MessageBox.Show(
-                "出力先フォルダの作成に失敗しました。\n\n" + dirEx.Message,
-                "エラー", MessageBoxButton.OK, MessageBoxImage.Error);
-            Shutdown(1);
-            return;
-        }
+        { MessageBox.Show("出力先フォルダの作成に失敗しました。\n\n" + dirEx.Message, "エラー", MessageBoxButton.OK, MessageBoxImage.Error); Shutdown(1); return; }
 
         // --- 起動モード判定 ---
         if (StartupArgs != null && StartupArgs.Length > 0)
@@ -962,18 +968,919 @@ public class InsuranceSeizureApp : Application
                 if (File.Exists(arg)) fileEntries.Add(new FileEntry { FilePath = arg, State = FileProcessState.Pending });
         }
 
-        // --- Phase 1 確認用: 設定読込成功 ---
-        MessageBox.Show(
-            "Phase 1: 設定読込テスト完了\n\n"
-            + "プロファイル: " + activeProfile.Name + "\n"
-            + "元号マッピング: " + eraMapping.Count + " 件\n"
-            + "保険会社名マッピング: " + (institutionNameMapping != null ? institutionNameMapping.Count + " 件" : "なし") + "\n"
-            + "出力先: " + activeProfile.OutputFolder,
-            "Phase 1", MessageBoxButton.OK, MessageBoxImage.Information);
-        Shutdown();
+        // --- ウィンドウ構築 ---
+        window = BuildWindow();
+        FindControls();
+        SetupEvents();
+        InitializeUI();
+        if (isFromFileSearch && fileEntries.Count > 0)
+            window.ContentRendered += delegate { LoadFileAtIndex(0); };
+        window.Closed += delegate { CleanupExcel(); };
+        window.Show();
+    }
+
+    private void FindControls()
+    {
+        initialPanel = (Grid)window.FindName("InitialPanel");
+        mainPanel = (Grid)window.FindName("MainPanel");
+        overlayPanel = (Grid)window.FindName("OverlayPanel");
+        loadingOverlay = (Grid)window.FindName("LoadingOverlay");
+        resultOverlay = (Grid)window.FindName("ResultOverlay");
+        sheetCombo = (ComboBox)window.FindName("SheetCombo");
+        fileLink = (TextBlock)window.FindName("FileLink");
+        txtAddressNum = (TextBox)window.FindName("TxtAddressNum");
+        txtName = (TextBox)window.FindName("TxtName");
+        txtInstitution = (TextBox)window.FindName("TxtInstitution");
+        txtStaff = (TextBox)window.FindName("TxtStaff");
+        txtResidenceAddr = (TextBox)window.FindName("TxtResidenceAddr");
+        txtDeliveryAddr = (TextBox)window.FindName("TxtDeliveryAddr");
+        txtExecDate = (TextBox)window.FindName("TxtExecDate");
+        chkDeliveryOutput = (CheckBox)window.FindName("ChkDeliveryOutput");
+        btnAdd = (Button)window.FindName("BtnAdd");
+        btnSkip = (Button)window.FindName("BtnSkip");
+        btnLoadFile = (Button)window.FindName("BtnLoadFile");
+        statusLeft = (TextBlock)window.FindName("StatusLeft");
+        statusRight = (TextBlock)window.FindName("StatusRight");
+        guideText = (TextBlock)window.FindName("GuideText");
+        deliveryError = (TextBlock)window.FindName("DeliveryError");
+        resultIcon = (TextBlock)window.FindName("ResultIcon");
+        resultIconBg = (Border)window.FindName("ResultIconBg");
+        resultTitle = (TextBlock)window.FindName("ResultTitle");
+        resultDetail = (TextBlock)window.FindName("ResultDetail");
+        resultButton = (Button)window.FindName("ResultButton");
+        resultSub = (TextBlock)window.FindName("ResultSub");
+        btnCalendar = (Button)window.FindName("BtnCalendar");
+        calendarPopup = (Popup)window.FindName("CalendarPopup");
+        dateCalendar = (System.Windows.Controls.Calendar)window.FindName("DateCalendar");
+        // 契約情報
+        txtContractExists = (TextBlock)window.FindName("TxtContractExists");
+        txtContractStatus = (TextBlock)window.FindName("TxtContractStatus");
+        txtPolicyNumber = (TextBlock)window.FindName("TxtPolicyNumber");
+        txtContractType = (TextBlock)window.FindName("TxtContractType");
+        txtContractDate = (TextBlock)window.FindName("TxtContractDate");
+        txtMaturityDate = (TextBlock)window.FindName("TxtMaturityDate");
+        txtPremium = (TextBlock)window.FindName("TxtPremium");
+        txtInsuredName = (TextBlock)window.FindName("TxtInsuredName");
+        txtSeizureRights = (TextBlock)window.FindName("TxtSeizureRights");
+        warningBanner = (Border)window.FindName("WarningBanner");
+        warningIcon = (TextBlock)window.FindName("WarningIcon");
+        warningText = (TextBlock)window.FindName("WarningText");
+        // 金額情報
+        txtSurrenderValue = (TextBlock)window.FindName("TxtSurrenderValue");
+        txtNetValue = (TextBlock)window.FindName("TxtNetValue");
+        lblDividend = (TextBlock)window.FindName("LblDividend");
+        txtDividend = (TextBlock)window.FindName("TxtDividend");
+        lblLoan = (TextBlock)window.FindName("LblLoan");
+        txtLoan = (TextBlock)window.FindName("TxtLoan");
+        lblUnpaidPremium = (TextBlock)window.FindName("LblUnpaidPremium");
+        txtUnpaidPremium = (TextBlock)window.FindName("TxtUnpaidPremium");
+        lblUnpaidInterest = (TextBlock)window.FindName("LblUnpaidInterest");
+        txtUnpaidInterest = (TextBlock)window.FindName("TxtUnpaidInterest");
+        lblPrepaidPremium = (TextBlock)window.FindName("LblPrepaidPremium");
+        txtPrepaidPremium = (TextBlock)window.FindName("TxtPrepaidPremium");
+        // スピナー
+        var spinnerElement = (FrameworkElement)window.FindName("SpinnerPath");
+        if (spinnerElement != null)
+            spinnerRotation = spinnerElement.RenderTransform as RotateTransform;
+    }
+
+    private void InitializeUI()
+    {
+        if (activeProfile.OutputFolder != null) statusRight.Text = activeProfile.OutputFolder;
+        ShowState("initial");
+    }
+
+    private void ShowState(string state)
+    {
+        initialPanel.Visibility = state == "initial" ? Visibility.Visible : Visibility.Collapsed;
+        mainPanel.Visibility = state == "main" ? Visibility.Visible : Visibility.Collapsed;
+        overlayPanel.Visibility = (state == "loading" || state == "result") ? Visibility.Visible : Visibility.Collapsed;
+        loadingOverlay.Visibility = state == "loading" ? Visibility.Visible : Visibility.Collapsed;
+        resultOverlay.Visibility = state == "result" ? Visibility.Visible : Visibility.Collapsed;
+        if (state == "initial") statusLeft.Text = "";
+    }
+
+    // ==============================================================
+    // イベントハンドラ
+    // ==============================================================
+
+    private void SetupEvents()
+    {
+        // D&D
+        window.AllowDrop = true;
+        window.Drop += delegate(object s, DragEventArgs de)
+        {
+            if (!de.Data.GetDataPresent(DataFormats.FileDrop)) return;
+            var files = ((string[])de.Data.GetData(DataFormats.FileDrop))
+                .Where(f => f.EndsWith(".xlsm", StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (files.Length > 0) StartFileProcessing(files);
+        };
+        window.DragOver += delegate(object s, DragEventArgs de)
+        { de.Effects = de.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None; de.Handled = true; };
+
+        // 初期画面ファイル選択
+        var btnSelect = (Button)window.FindName("BtnSelectFile");
+        if (btnSelect != null) btnSelect.Click += delegate { DoOpenFileDialog(true); };
+
+        // メインフォームボタン
+        btnLoadFile.Click += delegate { DoOpenFileDialog(false); };
+        fileLink.MouseDown += delegate
+        { if (!string.IsNullOrEmpty(currentFilePath) && File.Exists(currentFilePath)) try { Process.Start(new ProcessStartInfo(currentFilePath) { UseShellExecute = true }); } catch {} };
+        var btnReload = (Button)window.FindName("BtnReload");
+        if (btnReload != null) btnReload.Click += delegate { if (!string.IsNullOrEmpty(currentFilePath)) LoadSingleFile(currentFilePath); };
+
+        // シート切替
+        sheetCombo.SelectionChanged += delegate { if (!suppressSheetChange && sheetCombo.SelectedItem != null) { selectedSheetName = sheetCombo.SelectedItem.ToString(); ReloadSheetData(); } };
+
+        // 必須フィールドでボタン制御
+        txtName.TextChanged += delegate { UpdateAddButton(); };
+        txtStaff.TextChanged += delegate { UpdateAddButton(); };
+        txtResidenceAddr.TextChanged += delegate { UpdateAddButton(); };
+        txtExecDate.LostFocus += delegate
+        {
+            var input = txtExecDate.Text.Trim();
+            if (string.IsNullOrEmpty(input)) { processingDate = null; UpdateAddButton(); return; }
+            var dt = BusinessLogic.ParseFlexibleDate(input, eraMapping);
+            if (dt.HasValue)
+            {
+                processingDate = dt.Value;
+                txtExecDate.Text = dt.Value.ToString("yyyy/MM/dd");
+                txtExecDate.BorderBrush = BrushBorderNormal;
+            }
+            else
+            {
+                processingDate = null;
+                txtExecDate.BorderBrush = BrushValidationError;
+            }
+            UpdateAddButton();
+        };
+
+        // 届出住所バリデーション
+        txtDeliveryAddr.TextChanged += delegate { ValidateDelivery(); };
+        chkDeliveryOutput.Checked += delegate { ValidateDelivery(); };
+        chkDeliveryOutput.Unchecked += delegate { ValidateDelivery(); };
+
+        // カレンダーPopup
+        btnCalendar.Click += delegate
+        {
+            calendarPopup.PlacementTarget = btnCalendar;
+            if (!calendarPopup.IsOpen)
+            {
+                dateCalendar.DisplayMode = CalendarMode.Month;
+                dateCalendar.DisplayDate = processingDate ?? DateTime.Today;
+                dateCalendar.SelectedDates.Clear();
+            }
+            calendarPopup.IsOpen = !calendarPopup.IsOpen;
+        };
+        dateCalendar.SelectedDatesChanged += delegate
+        {
+            if (dateCalendar.SelectedDate.HasValue)
+            {
+                processingDate = dateCalendar.SelectedDate.Value;
+                txtExecDate.Text = processingDate.Value.ToString("yyyy/MM/dd");
+                txtExecDate.BorderBrush = BrushBorderNormal;
+                calendarPopup.IsOpen = false;
+                UpdateAddButton();
+            }
+        };
+
+        // アクション
+        btnAdd.Click += delegate { ExecuteAdd(); };
+        btnSkip.Click += delegate { ExecuteSkip(); };
+        resultButton.Click += delegate { ProceedToNext(); };
+
+        // ショートカット
+        window.InputBindings.Add(new KeyBinding(new RelayCommand(p => { if (overlayPanel.Visibility == Visibility.Visible) ProceedToNext(); }), new KeyGesture(Key.Escape)));
+        window.InputBindings.Add(new KeyBinding(new RelayCommand(p => DoOpenFileDialog(initialPanel.Visibility == Visibility.Visible)), new KeyGesture(Key.O, ModifierKeys.Control)));
+
+        // 空白クリックでフォーカスを外す
+        window.MouseDown += delegate(object s, MouseButtonEventArgs me)
+        {
+            if (me.OriginalSource is System.Windows.Controls.Panel ||
+                me.OriginalSource is Border || me.OriginalSource is Window)
+            { FocusManager.SetFocusedElement(window, window); Keyboard.ClearFocus(); }
+        };
+
+        // スピナーアニメーション: LoadingOverlay の表示/非表示に連動
+        loadingOverlay.IsVisibleChanged += delegate(object s, DependencyPropertyChangedEventArgs dpce)
+        {
+            if ((bool)dpce.NewValue) StartSpinner();
+            else StopSpinner();
+        };
+    }
+
+    private void UpdateAddButton()
+    {
+        string msg = "";
+        if (string.IsNullOrWhiteSpace(txtName.Text)) msg = "氏名を入力してください";
+        else if (string.IsNullOrWhiteSpace(txtStaff.Text)) msg = "処分担当を入力してください";
+        else if (string.IsNullOrWhiteSpace(txtResidenceAddr.Text)) msg = "住民票住所を入力してください";
+        else if (!processingDate.HasValue) msg = "執行日を入力してください";
+        // 保険契約無の場合はボタン無効化
+        if (string.IsNullOrEmpty(msg) && txtContractExists != null &&
+            txtContractExists.Text.Trim() == "無")
+            msg = "保険契約がありません";
+        btnAdd.IsEnabled = string.IsNullOrEmpty(msg);
+        guideText.Text = msg;
+    }
+
+    private void ValidateDelivery()
+    {
+        if (chkDeliveryOutput.IsChecked == true && !string.IsNullOrEmpty(txtDeliveryAddr.Text))
+        {
+            int len = ("（届出：" + txtDeliveryAddr.Text.Trim() + "）").Length;
+            if (len > 50) { deliveryError.Text = "50文字を超えています（現在: " + len + "文字）"; deliveryError.Visibility = Visibility.Visible; return; }
+        }
+        deliveryError.Visibility = Visibility.Collapsed;
+    }
+
+    // ==============================================================
+    // アニメーション
+    // ==============================================================
+
+    private void StartSpinner()
+    {
+        if (spinnerRotation == null) return;
+        var anim = new DoubleAnimation { By = 360, Duration = new Duration(TimeSpan.FromSeconds(1)), RepeatBehavior = RepeatBehavior.Forever };
+        spinnerRotation.BeginAnimation(RotateTransform.AngleProperty, anim);
+    }
+
+    private void StopSpinner()
+    {
+        if (spinnerRotation == null) return;
+        spinnerRotation.BeginAnimation(RotateTransform.AngleProperty, null);
+    }
+
+    private void FadeInOverlay()
+    {
+        overlayPanel.BeginAnimation(UIElement.OpacityProperty, null);
+        overlayPanel.Opacity = 0;
+        overlayPanel.Visibility = Visibility.Visible;
+        overlayPanel.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(150))));
+    }
+
+    private void FadeOutOverlay(Action onComplete = null)
+    {
+        var anim = new DoubleAnimation(1, 0, new Duration(TimeSpan.FromMilliseconds(150)));
+        anim.Completed += delegate
+        {
+            overlayPanel.Visibility = Visibility.Collapsed;
+            overlayPanel.BeginAnimation(UIElement.OpacityProperty, null);
+            overlayPanel.Opacity = 1;
+            if (onComplete != null) onComplete();
+        };
+        overlayPanel.BeginAnimation(UIElement.OpacityProperty, anim);
+    }
+
+    private void CrossFadeToResult(string type, string title, string detail)
+    {
+        var fadeOut = new DoubleAnimation(1, 0, new Duration(TimeSpan.FromMilliseconds(100)));
+        fadeOut.Completed += delegate
+        {
+            ShowResult(type, title, detail);
+            overlayPanel.BeginAnimation(UIElement.OpacityProperty,
+                new DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(100))));
+        };
+        overlayPanel.BeginAnimation(UIElement.OpacityProperty, fadeOut);
+    }
+
+    // ==============================================================
+    // ファイル処理
+    // ==============================================================
+
+    private void DoOpenFileDialog(bool isInitial)
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog { Filter = "Excel (*.xlsm)|*.xlsm", Multiselect = true, Title = "照会結果ファイルを選択" };
+        if (!isInitial && !string.IsNullOrEmpty(currentFilePath)) dlg.InitialDirectory = System.IO.Path.GetDirectoryName(currentFilePath);
+        else if (activeProfile.DefaultFolder != null && Directory.Exists(activeProfile.DefaultFolder)) dlg.InitialDirectory = activeProfile.DefaultFolder;
+        if (dlg.ShowDialog() == true) StartFileProcessing(dlg.FileNames);
+    }
+
+    private void StartFileProcessing(string[] paths)
+    {
+        fileEntries.Clear();
+        foreach (var p in paths) fileEntries.Add(new FileEntry { FilePath = p, State = FileProcessState.Pending });
+        LoadFileAtIndex(0);
+    }
+
+    private void LoadFileAtIndex(int index)
+    {
+        if (index >= fileEntries.Count)
+        {
+            if (isFromFileSearch) { Shutdown(); return; }
+            var fadeOut = new DoubleAnimation(1, 0, new Duration(TimeSpan.FromMilliseconds(150)));
+            fadeOut.Completed += delegate
+            {
+                mainPanel.BeginAnimation(UIElement.OpacityProperty, null);
+                mainPanel.Opacity = 1;
+                ShowState("initial");
+                initialPanel.Opacity = 0;
+                initialPanel.BeginAnimation(UIElement.OpacityProperty,
+                    new DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(150))));
+            };
+            mainPanel.BeginAnimation(UIElement.OpacityProperty, fadeOut);
+            return;
+        }
+        currentFileIndex = index;
+        currentFilePath = fileEntries[index].FilePath;
+        statusLeft.Text = fileEntries.Count > 1 ? (index + 1) + " / " + fileEntries.Count + " 件目" : "";
+        txtExecDate.Text = ""; processingDate = null;
+        chkDeliveryOutput.IsChecked = false;
+        deliveryError.Visibility = Visibility.Collapsed;
+        LoadSingleFile(currentFilePath);
+    }
+
+    private void LoadSingleFile(string filePath)
+    {
+        ShowState("main");
+        mainPanel.Visibility = Visibility.Visible;
+        loadingOverlay.Visibility = Visibility.Visible;
+        resultOverlay.Visibility = Visibility.Collapsed;
+        FadeInOverlay();
+
+        var worker = new BackgroundWorker();
+        worker.DoWork += delegate(object s, DoWorkEventArgs args) { args.Result = ReadExcelFile(filePath); };
+        worker.RunWorkerCompleted += delegate(object s, RunWorkerCompletedEventArgs args)
+        {
+            if (args.Error != null) { CrossFadeToResult("error", "読込失敗", args.Error.Message); return; }
+            var data = args.Result as Dictionary<string, object>;
+            if (data != null && data.ContainsKey("error")) { CrossFadeToResult("error", "読込失敗", data["error"].ToString()); return; }
+            PopulateForm(data);
+            FadeOutOverlay();
+        };
+        worker.RunWorkerAsync();
+    }
+
+    // Phase 3 で実装: シート切替時にデータを再読み込みする
+    private void ReloadSheetData()
+    {
+        // TODO: Phase 3
+    }
+
+    // ==============================================================
+    // Excel読取り（Phase 3 で実装）
+    // ==============================================================
+
+    // Phase 3 で実装: Excel COM でファイルからデータを読み取る
+    private Dictionary<string, object> ReadExcelFile(string filePath)
+    {
+        var result = new Dictionary<string, object>();
+        result["filePath"] = filePath;
+        result["fileName"] = System.IO.Path.GetFileName(filePath);
+        result["sheets"] = new List<string> { "(Phase 3 で実装)" };
+        result["selectedSheet"] = "(Phase 3 で実装)";
+        result["sheetData"] = new InsuranceData
+        {
+            AddressNum = "", Name = "", Staff = "", Address = "",
+            InstitutionName = "", ContractExists = "", PolicyNumber = "",
+            ContractStatus = "", ContractType = "", InsuredName = "",
+            SeizureRights = "", PaymentFrequency = ""
+        };
+        return result;
+    }
+
+    // フォームにデータ反映
+    private void PopulateForm(Dictionary<string, object> data)
+    {
+        if (data == null) return;
+        fileLink.Text = (data["fileName"] ?? "").ToString();
+        var sheets = data["sheets"] as List<string>;
+        sheetCombo.Items.Clear();
+        if (sheets != null) foreach (var s in sheets) sheetCombo.Items.Add(s);
+        suppressSheetChange = true;
+        if (sheetCombo.Items.Count > 0) sheetCombo.SelectedIndex = 0;
+        suppressSheetChange = false;
+        if (sheetCombo.SelectedItem != null) selectedSheetName = sheetCombo.SelectedItem.ToString();
+        if (data.ContainsKey("sheetData")) ApplySheet(data["sheetData"] as InsuranceData);
+    }
+
+    // InsuranceData を画面に反映する
+    private void ApplySheet(InsuranceData d)
+    {
+        if (d == null) return;
+        // 基本情報
+        txtAddressNum.Text = BusinessLogic.FormatAddressNumber(d.AddressNum ?? "");
+        txtName.Text = (d.Name ?? "").Trim();
+        txtInstitution.Text = (d.InstitutionName ?? "").Trim();
+        txtStaff.Text = (d.Staff ?? "").Trim();
+        txtResidenceAddr.Text = BusinessLogic.FormatAddress(d.Address ?? "");
+        txtDeliveryAddr.Text = BusinessLogic.FormatAddress(d.RespAddress ?? "");
+        // 契約情報
+        txtContractExists.Text = (d.ContractExists ?? "").Trim();
+        txtContractExists.Foreground = (d.ContractExists ?? "").Contains("有") ? BrushSuccessIcon : BrushValidationError;
+        txtContractStatus.Text = (d.ContractStatus ?? "").Trim();
+        txtPolicyNumber.Text = (d.PolicyNumber ?? "").Trim();
+        txtContractType.Text = (d.ContractType ?? "").Trim();
+        txtContractDate.Text = (d.ContractDate ?? "").Trim();
+        txtMaturityDate.Text = (d.MaturityDate ?? "").Trim();
+        txtPremium.Text = (d.PremiumDisplay ?? "").Trim();
+        txtInsuredName.Text = (d.InsuredName ?? "").Trim();
+        txtSeizureRights.Text = (d.SeizureRights ?? "").Trim();
+        // 警告バナー
+        UpdateWarningBanner(d);
+        // 金額情報
+        txtSurrenderValue.Text = BusinessLogic.FormatBalance(d.SurrenderValue);
+        SetFinancialRow(lblDividend, txtDividend, "配当金", d.DividendExists, d.DividendAmount, false);
+        SetFinancialRow(lblLoan, txtLoan, "貸付金", d.LoanExists, d.LoanAmount, true);
+        SetFinancialRow(lblUnpaidPremium, txtUnpaidPremium, "未払い保険料", d.UnpaidPremiumExists, d.UnpaidPremiumAmount, true);
+        SetFinancialRow(lblUnpaidInterest, txtUnpaidInterest, "未払い利息", d.UnpaidInterestExists, d.UnpaidInterestAmount, true);
+        SetFinancialRow(lblPrepaidPremium, txtPrepaidPremium, "前払い保険料", d.PrepaidPremiumExists, d.PrepaidPremiumAmount, false);
+        txtNetValue.Text = string.Format("{0:N0}円", d.NetValue);
+        UpdateAddButton();
+    }
+
+    // 金額情報の1行を設定する（ラベルに有無表示、金額にマイナス表示）
+    private void SetFinancialRow(TextBlock lbl, TextBlock val, string baseName,
+        string exists, double amount, bool showNegative)
+    {
+        string suffix = string.IsNullOrEmpty(exists) ? "" : "（" + exists.Trim() + "）";
+        lbl.Text = baseName + suffix;
+        if (amount == 0 && (exists ?? "").Contains("無"))
+        {
+            val.Text = "0円";
+            val.Foreground = BrushDetailMuted;
+        }
+        else if (amount == 0 && string.IsNullOrWhiteSpace(exists))
+        {
+            val.Text = "\u2014";  // em dash
+            val.Foreground = BrushDetailMuted;
+        }
+        else
+        {
+            double displayAmount = showNegative ? -Math.Abs(amount) : amount;
+            val.Text = string.Format("{0:N0}円", displayAmount);
+            val.Foreground = showNegative && amount > 0 ? BrushValidationError : new SolidColorBrush((Color)ColorConverter.ConvertFromString("#333"));
+        }
+    }
+
+    // 警告バナーの表示制御
+    private void UpdateWarningBanner(InsuranceData d)
+    {
+        string contractExists = (d.ContractExists ?? "").Trim();
+        string seizureRights = (d.SeizureRights ?? "").Trim();
+        if (contractExists == "無")
+        {
+            // エラーレベル: 保険契約なし
+            warningBanner.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FCEBEB"));
+            warningBanner.BorderBrush = BrushValidationError;
+            warningBanner.BorderThickness = new Thickness(1);
+            warningIcon.Text = "\u2717"; warningIcon.Foreground = BrushValidationError;
+            warningText.Text = "保険契約がありません \u2014 スキップを推奨します";
+            warningText.Foreground = BrushValidationError;
+            warningBanner.Visibility = Visibility.Visible;
+        }
+        else if (seizureRights.Contains("有"))
+        {
+            // 注意レベル: 差押権利者あり
+            warningBanner.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#FFF3E0"));
+            warningBanner.BorderBrush = BrushAccent;
+            warningBanner.BorderThickness = new Thickness(1);
+            warningIcon.Text = "\u26A0"; warningIcon.Foreground = BrushWarningText;
+            warningText.Text = "差押権利者が存在します \u2014 差押えの可否を確認してください";
+            warningText.Foreground = BrushWarningText;
+            warningBanner.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            warningBanner.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    // ==============================================================
+    // 処理結果オーバーレイ
+    // ==============================================================
+
+    private void ShowResult(string type, string title, string detail)
+    {
+        overlayPanel.Visibility = Visibility.Visible; loadingOverlay.Visibility = Visibility.Collapsed; resultOverlay.Visibility = Visibility.Visible;
+        resultTitle.Text = title;
+        resultDetail.Text = detail;
+        resultDetail.Visibility = string.IsNullOrEmpty(detail) ? Visibility.Collapsed : Visibility.Visible;
+        bool last = currentFileIndex >= fileEntries.Count - 1;
+        if (type == "success")
+        {
+            resultIcon.Text = "\u2713";
+            resultIcon.Foreground = BrushSuccessIcon;
+            resultIconBg.Background = BrushIconBgSuccess;
+            resultDetail.Foreground = BrushAccent;
+        }
+        else if (type == "skip")
+        {
+            resultIcon.Text = "\u2192";
+            resultIcon.Foreground = BrushAccent;
+            resultIconBg.Background = BrushIconBgSkip;
+            resultDetail.Foreground = BrushDetailMuted;
+        }
+        else
+        {
+            resultIcon.Text = "\u2717";
+            resultIcon.Foreground = BrushValidationError;
+            resultIconBg.Background = BrushIconBgError;
+            resultDetail.Foreground = BrushValidationError;
+        }
+        resultButton.Content = last ? "完了" : "次のファイルへ \u2192";
+        resultSub.Text = last ? "" : ((currentFileIndex + 2) + " / " + fileEntries.Count + " 件目へ進みます");
+        resultSub.Visibility = last ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void ProceedToNext()
+    {
+        FadeOutOverlay(delegate { LoadFileAtIndex(currentFileIndex + 1); });
+    }
+
+    private void ExecuteSkip()
+    {
+        if (currentFileIndex >= 0 && currentFileIndex < fileEntries.Count)
+            fileEntries[currentFileIndex].State = FileProcessState.Skipped;
+        ShowResult("skip", "スキップしました", System.IO.Path.GetFileName(currentFilePath));
+        FadeInOverlay();
+    }
+
+    // Phase 4 で実装: 一覧に追加
+    private void ExecuteAdd()
+    {
+        // TODO: Phase 4
+        CrossFadeToResult("error", "未実装", "Phase 4 で実装予定です");
+    }
+
+    // ==============================================================
+    // CSV 操作
+    // ==============================================================
+
+    private bool WriteCsvLine(string csvPath, string csvLine)
+    {
+        var dir = System.IO.Path.GetDirectoryName(csvPath);
+        if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+        bool isNewFile = !File.Exists(csvPath);
+        for (int retry = 1; retry <= CSV_WRITE_MAX_RETRY; retry++)
+        {
+            try
+            {
+                using (var fs = new FileStream(csvPath, FileMode.Append, FileAccess.Write, FileShare.None))
+                using (var w = new StreamWriter(fs, new UTF8Encoding(true)))
+                {
+                    if (isNewFile) w.WriteLine(CSV_HEADER);
+                    w.WriteLine(csvLine);
+                    w.Flush();
+                }
+                return true;
+            }
+            catch { if (retry < CSV_WRITE_MAX_RETRY) System.Threading.Thread.Sleep(CSV_WRITE_RETRY_INTERVAL_MS); }
+        }
+        return false;
+    }
+
+    // ==============================================================
+    // 文書番号管理
+    // ==============================================================
+
+    private bool AllocateDocNumber(out string docNum)
+    {
+        docNum = "";
+        string counterPath = System.IO.Path.Combine(exeDir, DOC_NUMBER_FILE);
+        for (int retry = 1; retry <= CSV_WRITE_MAX_RETRY; retry++)
+        {
+            try
+            {
+                using (var fs = new FileStream(counterPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                {
+                    var bytes = new byte[fs.Length];
+                    fs.Read(bytes, 0, bytes.Length);
+                    var json = Encoding.UTF8.GetString(bytes).TrimStart('\uFEFF');
+                    int nextNumber = JsonHelper.GetInt(json, "nextNumber", 1);
+                    docNum = nextNumber.ToString();
+                    lastDocNumber = docNum;
+                    fs.Seek(0, SeekOrigin.Begin); fs.SetLength(0);
+                    var newBytes = Encoding.UTF8.GetBytes("{\n    \"nextNumber\":  " + (nextNumber + 1) + "\n}");
+                    fs.Write(newBytes, 0, newBytes.Length);
+                }
+                return true;
+            }
+            catch { if (retry < CSV_WRITE_MAX_RETRY) System.Threading.Thread.Sleep(CSV_WRITE_RETRY_INTERVAL_MS); }
+        }
+        return false;
+    }
+
+    private void RollbackDocNumber()
+    {
+        if (string.IsNullOrEmpty(lastDocNumber)) return;
+        string counterPath = System.IO.Path.Combine(exeDir, DOC_NUMBER_FILE);
+        for (int retry = 1; retry <= CSV_WRITE_MAX_RETRY; retry++)
+        {
+            try
+            {
+                using (var fs = new FileStream(counterPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                {
+                    fs.Seek(0, SeekOrigin.Begin); fs.SetLength(0);
+                    var bytes = Encoding.UTF8.GetBytes("{\n    \"nextNumber\":  " + lastDocNumber + "\n}");
+                    fs.Write(bytes, 0, bytes.Length);
+                }
+                return;
+            }
+            catch { if (retry < CSV_WRITE_MAX_RETRY) System.Threading.Thread.Sleep(CSV_WRITE_RETRY_INTERVAL_MS); }
+        }
+    }
+
+    // ==============================================================
+    // Excel COM クリーンアップ
+    // ==============================================================
+
+    private void CleanupExcel()
+    {
+        if (excel == null) return;
+        try
+        {
+            try
+            {
+                while ((int)excel.Workbooks.Count > 0)
+                { dynamic wb = excel.Workbooks[1]; try { wb.Close(false); } catch { } }
+            }
+            catch { }
+            try { excel.ScreenUpdating = true; } catch { }
+            try { excel.DisplayAlerts = true; } catch { }
+            excel.Quit();
+            try { Marshal.ReleaseComObject(excel); } catch { }
+        }
+        catch { }
+        finally
+        {
+            excel = null;
+            GC.Collect(); GC.WaitForPendingFinalizers();
+            GC.Collect(); GC.WaitForPendingFinalizers();
+        }
+    }
+
+    // ==============================================================
+    // XAML 定義
+    // ==============================================================
+
+    private Window BuildWindow()
+    {
+        string xaml = @"
+<Window xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'
+    xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml'
+    Title='生命保険差押予定一覧 作成ツール' Width='1100' Height='700' MinWidth='1000' MinHeight='520'
+    WindowStartupLocation='CenterScreen' Background='#F9F9F9' FontFamily='Meiryo UI'
+    UseLayoutRounding='True' SnapsToDevicePixels='True'>
+<Window.Resources>
+    <Style TargetType='TextBox'>
+        <Setter Property='Foreground' Value='#333'/>
+        <Setter Property='Template'><Setter.Value>
+            <ControlTemplate TargetType='TextBox'>
+                <Border Background='{TemplateBinding Background}'
+                        BorderBrush='{TemplateBinding BorderBrush}'
+                        BorderThickness='{TemplateBinding BorderThickness}'
+                        CornerRadius='4' Padding='{TemplateBinding Padding}'
+                        SnapsToDevicePixels='True'>
+                    <ScrollViewer x:Name='PART_ContentHost' Focusable='False'/></Border>
+            </ControlTemplate>
+        </Setter.Value></Setter>
+    </Style>
+    <Style TargetType='ComboBox'>
+        <Setter Property='Foreground' Value='#333'/><Setter Property='Background' Value='White'/>
+        <Setter Property='BorderBrush' Value='#D0D0D0'/><Setter Property='BorderThickness' Value='1'/>
+        <Setter Property='Padding' Value='6,5'/><Setter Property='Cursor' Value='Hand'/>
+        <Setter Property='Template'><Setter.Value>
+            <ControlTemplate TargetType='ComboBox'>
+                <Grid x:Name='comboRoot'>
+                    <ToggleButton BorderThickness='0' Background='Transparent' Focusable='False' ClickMode='Press'
+                        IsChecked='{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}'>
+                        <ToggleButton.Template><ControlTemplate TargetType='ToggleButton'>
+                            <Border Background='Transparent'/></ControlTemplate></ToggleButton.Template>
+                    </ToggleButton>
+                    <Border x:Name='bd' Background='{TemplateBinding Background}'
+                            BorderBrush='{TemplateBinding BorderBrush}'
+                            BorderThickness='{TemplateBinding BorderThickness}' CornerRadius='4' IsHitTestVisible='False'>
+                        <Grid Margin='{TemplateBinding Padding}'>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width='*'/><ColumnDefinition Width='20'/></Grid.ColumnDefinitions>
+                            <ContentPresenter Content='{TemplateBinding SelectionBoxItem}'
+                                ContentTemplate='{TemplateBinding SelectionBoxItemTemplate}'
+                                HorizontalAlignment='Left' VerticalAlignment='Center'/>
+                            <Path Grid.Column='1' Data='M0,0 L4,4 8,0' Stroke='#888' StrokeThickness='1.5'
+                                  VerticalAlignment='Center' HorizontalAlignment='Center'/>
+                        </Grid></Border>
+                    <Popup x:Name='PART_Popup' AllowsTransparency='True' Placement='Bottom'
+                           IsOpen='{TemplateBinding IsDropDownOpen}'>
+                        <Border Background='White' BorderBrush='#D0D0D0' BorderThickness='1'
+                                CornerRadius='4' Margin='0,2,0,0' Padding='0,4'
+                                MinWidth='{Binding ActualWidth, ElementName=comboRoot}'>
+                            <Border.Effect><DropShadowEffect BlurRadius='8' ShadowDepth='2' Opacity='0.12'/></Border.Effect>
+                            <ScrollViewer MaxHeight='200'><StackPanel IsItemsHost='True'/></ScrollViewer>
+                        </Border></Popup>
+                </Grid>
+                <ControlTemplate.Triggers>
+                    <Trigger Property='IsMouseOver' Value='True'>
+                        <Setter TargetName='bd' Property='BorderBrush' Value='#E69500'/></Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+        </Setter.Value></Setter>
+    </Style>
+    <Style x:Key='AB' TargetType='Button'>
+        <Setter Property='Background' Value='#E69500'/><Setter Property='Foreground' Value='White'/>
+        <Setter Property='FontSize' Value='12'/><Setter Property='Padding' Value='16,8'/>
+        <Setter Property='Cursor' Value='Hand'/><Setter Property='BorderThickness' Value='0'/>
+        <Setter Property='Template'><Setter.Value><ControlTemplate TargetType='Button'>
+            <Border x:Name='bd' Background='{TemplateBinding Background}' CornerRadius='4' Padding='{TemplateBinding Padding}'>
+                <ContentPresenter HorizontalAlignment='Center' VerticalAlignment='Center'/></Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property='IsMouseOver' Value='True'><Setter TargetName='bd' Property='Background' Value='#CC8400'/></Trigger>
+                <Trigger Property='IsEnabled' Value='False'><Setter TargetName='bd' Property='Background' Value='#CCC'/><Setter Property='Foreground' Value='#999'/></Trigger>
+            </ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
+    <Style x:Key='GB' TargetType='Button'>
+        <Setter Property='Background' Value='White'/><Setter Property='Foreground' Value='#555'/>
+        <Setter Property='FontSize' Value='12'/><Setter Property='Padding' Value='16,8'/>
+        <Setter Property='Cursor' Value='Hand'/><Setter Property='BorderBrush' Value='#D0D0D0'/><Setter Property='BorderThickness' Value='1'/>
+        <Setter Property='Template'><Setter.Value><ControlTemplate TargetType='Button'>
+            <Border x:Name='bd' Background='{TemplateBinding Background}' BorderBrush='{TemplateBinding BorderBrush}'
+                BorderThickness='{TemplateBinding BorderThickness}' CornerRadius='4' Padding='{TemplateBinding Padding}'>
+                <ContentPresenter HorizontalAlignment='Center' VerticalAlignment='Center'/></Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property='IsMouseOver' Value='True'><Setter TargetName='bd' Property='Background' Value='#FFF6E8'/></Trigger>
+            </ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
+    <Style TargetType='CheckBox'>
+        <Setter Property='Foreground' Value='#333'/><Setter Property='Cursor' Value='Hand'/>
+        <Setter Property='Template'><Setter.Value>
+            <ControlTemplate TargetType='CheckBox'>
+                <StackPanel Orientation='Horizontal'>
+                    <Border x:Name='cbBox' Width='16' Height='16' CornerRadius='3'
+                            Background='White' BorderBrush='#C8C8C8' BorderThickness='1'
+                            VerticalAlignment='Center' Margin='0,0,6,0'>
+                        <Path x:Name='cbCheck' Data='M2.5,7 L5.5,10 L11.5,3.5' Stroke='White'
+                              StrokeThickness='2' Visibility='Collapsed'/></Border>
+                    <ContentPresenter VerticalAlignment='Center'/></StackPanel>
+                <ControlTemplate.Triggers>
+                    <Trigger Property='IsChecked' Value='True'>
+                        <Setter TargetName='cbBox' Property='Background' Value='#E69500'/>
+                        <Setter TargetName='cbBox' Property='BorderBrush' Value='#E69500'/>
+                        <Setter TargetName='cbCheck' Property='Visibility' Value='Visible'/></Trigger>
+                    <Trigger Property='IsMouseOver' Value='True'>
+                        <Setter TargetName='cbBox' Property='BorderBrush' Value='#E69500'/></Trigger>
+                </ControlTemplate.Triggers>
+            </ControlTemplate>
+        </Setter.Value></Setter>
+    </Style>
+</Window.Resources>
+<DockPanel>
+    <Border DockPanel.Dock='Top' Background='#E69500' Padding='18,10'>
+        <TextBlock Text='生命保険差押予定一覧 作成ツール' FontSize='13' FontWeight='Medium' Foreground='White'/></Border>
+    <Border DockPanel.Dock='Bottom' Background='#F0F0F0' BorderBrush='#E0E0E0' BorderThickness='0,1,0,0' Padding='18,4'>
+        <DockPanel>
+                <StackPanel DockPanel.Dock='Right' Orientation='Horizontal'>
+                    <TextBlock Text='出力先: ' FontSize='11' Foreground='#666'/>
+                    <TextBlock x:Name='StatusRight' FontSize='11' Foreground='#666'/></StackPanel>
+                <TextBlock x:Name='StatusLeft' FontSize='11' Foreground='#666'/></DockPanel></Border>
+    <Grid>
+        <!-- 初期画面 -->
+        <Grid x:Name='InitialPanel'>
+            <Border Background='White' BorderBrush='#D4B88A' BorderThickness='2' CornerRadius='8'
+                    Margin='80,60' VerticalAlignment='Center' HorizontalAlignment='Center' Padding='60,40'>
+                <StackPanel HorizontalAlignment='Center'>
+                    <TextBlock Text='&#x1F4C2;' FontSize='36' HorizontalAlignment='Center' Margin='0,0,0,12'/>
+                    <TextBlock Text='ここにファイルをドラッグ＆ドロップ' FontSize='14' Foreground='#666' HorizontalAlignment='Center' Margin='0,0,0,16'/>
+                    <Button x:Name='BtnSelectFile' Style='{StaticResource AB}' HorizontalAlignment='Center'>
+                        <TextBlock Text='ファイルを選択' FontSize='13'/></Button>
+                </StackPanel></Border></Grid>
+        <!-- メインフォーム -->
+        <Grid x:Name='MainPanel' Visibility='Collapsed' Margin='18,14,18,12'>
+            <Grid.RowDefinitions>
+                <RowDefinition Height='Auto'/><RowDefinition Height='Auto'/>
+                <RowDefinition Height='*'/><RowDefinition Height='Auto'/></Grid.RowDefinitions>
+            <!-- シート選択 -->
+            <DockPanel Grid.Row='0' Margin='0,0,0,10'>
+                <TextBlock Text='シート:' VerticalAlignment='Center' Foreground='#555' FontSize='11' Margin='0,0,6,0'/>
+                <ComboBox x:Name='SheetCombo' MinWidth='180' FontSize='12'/>
+                <StackPanel DockPanel.Dock='Right' Orientation='Horizontal' HorizontalAlignment='Right'>
+                    <TextBlock Text='&#x1F4C4; ' FontSize='11' Foreground='#E69500' VerticalAlignment='Center'/>
+                    <TextBlock x:Name='FileLink' FontSize='11' Foreground='#E69500'
+                               Cursor='Hand' TextDecorations='Underline' VerticalAlignment='Center'/>
+                    <Button x:Name='BtnReload' Style='{StaticResource GB}' Padding='8,4' Margin='8,0,0,0' FontSize='11'>
+                        <TextBlock Text='&#x1F504; 再読み込み'/></Button>
+                </StackPanel>
+            </DockPanel>
+            <!-- 基本情報 -->
+            <Border Grid.Row='1' Background='White' BorderBrush='#E0E0E0' BorderThickness='1' CornerRadius='6' Padding='16,14' Margin='0,0,0,10'>
+                <StackPanel><TextBlock Text='&#x1F464; 基本情報' FontSize='13' Foreground='#E69500' FontWeight='Medium' Margin='0,0,0,10'/>
+                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width='*'/><ColumnDefinition Width='16'/><ColumnDefinition Width='*'/></Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions><RowDefinition Height='Auto'/><RowDefinition Height='6'/>
+                        <RowDefinition Height='Auto'/><RowDefinition Height='6'/><RowDefinition Height='Auto'/></Grid.RowDefinitions>
+                    <Grid Grid.Row='0' Grid.Column='0'><Grid.ColumnDefinitions><ColumnDefinition Width='120'/><ColumnDefinition Width='16'/><ColumnDefinition Width='*'/></Grid.ColumnDefinitions>
+                        <StackPanel><TextBlock Text='宛名番号' FontSize='11' Foreground='#777' Margin='0,0,0,3'/>
+                            <TextBox x:Name='TxtAddressNum' IsReadOnly='True' Background='#F3F3F3' BorderBrush='#E8E8E8' FontFamily='Consolas' FontSize='12' Padding='5,4'/></StackPanel>
+                        <StackPanel Grid.Column='2'><TextBlock FontSize='11' Foreground='#777' Margin='0,0,0,3'>氏名 &#x270E;</TextBlock>
+                            <TextBox x:Name='TxtName' FontSize='12' Padding='5,4' BorderBrush='#D0D0D0'/></StackPanel></Grid>
+                    <Grid Grid.Row='0' Grid.Column='2'><Grid.ColumnDefinitions><ColumnDefinition Width='1.5*'/><ColumnDefinition Width='16'/><ColumnDefinition Width='*'/></Grid.ColumnDefinitions>
+                        <StackPanel><TextBlock Text='保険会社' FontSize='11' Foreground='#777' Margin='0,0,0,3'/>
+                            <TextBox x:Name='TxtInstitution' IsReadOnly='True' Background='#F3F3F3' BorderBrush='#E8E8E8' FontSize='12' Padding='5,4'/></StackPanel>
+                        <StackPanel Grid.Column='2'><TextBlock FontSize='11' Foreground='#777' Margin='0,0,0,3'>処分担当 &#x270E;</TextBlock>
+                            <TextBox x:Name='TxtStaff' FontSize='12' Padding='5,4' BorderBrush='#D0D0D0'/></StackPanel></Grid>
+                    <StackPanel Grid.Row='2' Grid.Column='0'><TextBlock FontSize='11' Foreground='#777' Margin='0,0,0,3'>住民票住所 &#x270E;</TextBlock>
+                        <TextBox x:Name='TxtResidenceAddr' FontSize='12' Padding='5,4' BorderBrush='#D0D0D0'/></StackPanel>
+                    <StackPanel Grid.Row='2' Grid.Column='2'><TextBlock FontSize='11' Foreground='#777' Margin='0,0,0,3'>届出住所 &#x270E;</TextBlock>
+                        <TextBox x:Name='TxtDeliveryAddr' FontSize='12' Padding='5,4' BorderBrush='#D0D0D0'/>
+                        <TextBlock x:Name='DeliveryError' Foreground='#D32F2F' FontSize='10' Visibility='Collapsed' Margin='0,1,0,0'/></StackPanel>
+                    <StackPanel Grid.Row='4' Grid.Column='0'><TextBlock Text='執行日' FontSize='11' Foreground='#777' Margin='0,0,0,3'/>
+                        <StackPanel Orientation='Horizontal'>
+                            <TextBox x:Name='TxtExecDate' FontSize='12' Padding='5,4' BorderBrush='#D0D0D0' FontFamily='Consolas' Width='120'/>
+                            <Button x:Name='BtnCalendar' Style='{StaticResource GB}' Padding='6,4' Margin='4,0,0,0'>
+                                <TextBlock Text='&#x1F4C5;' FontSize='13'/></Button>
+                            <Popup x:Name='CalendarPopup' StaysOpen='False' Placement='Bottom' AllowsTransparency='True'>
+                                <Border Background='White' BorderBrush='#D0D0D0' BorderThickness='1'
+                                        CornerRadius='6' Padding='8' Margin='0,4,0,0'>
+                                    <Border.Effect><DropShadowEffect BlurRadius='12' ShadowDepth='3' Opacity='0.15'/></Border.Effect>
+                                    <Calendar x:Name='DateCalendar' SelectionMode='SingleDate'/></Border>
+                            </Popup>
+                        </StackPanel></StackPanel>
+                    <StackPanel Grid.Row='4' Grid.Column='2' VerticalAlignment='Top' Margin='0,18,0,0'>
+                        <CheckBox x:Name='ChkDeliveryOutput' Content='届出住所を差押通知書に出力する' FontSize='12'/></StackPanel>
+                </Grid></StackPanel></Border>
+            <!-- 契約情報 + 金額情報 -->
+            <Grid Grid.Row='2'>
+                <Grid.ColumnDefinitions><ColumnDefinition Width='1.2*'/><ColumnDefinition Width='8'/><ColumnDefinition Width='*'/></Grid.ColumnDefinitions>
+                <Border Grid.Column='0' Background='White' BorderBrush='#E0E0E0' BorderThickness='1' CornerRadius='6' Padding='14,12' Margin='0,0,0,10'>
+                    <StackPanel>
+                        <TextBlock Text='&#x1F4CB; 契約情報' FontSize='13' Foreground='#E69500' FontWeight='Medium' Margin='0,0,0,8'/>
+                        <Border x:Name='WarningBanner' Visibility='Collapsed' CornerRadius='4' Padding='6,5' Margin='0,0,0,8'>
+                            <StackPanel Orientation='Horizontal'>
+                                <TextBlock x:Name='WarningIcon' FontSize='14' Margin='0,0,6,0'/>
+                                <TextBlock x:Name='WarningText' FontSize='11'/></StackPanel></Border>
+                        <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock Text='保険契約の有無' Foreground='#777' FontSize='11'/>
+                            <TextBlock x:Name='TxtContractExists' Foreground='#333' FontSize='11' FontWeight='Medium' HorizontalAlignment='Right'/></DockPanel></Border>
+                        <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock Text='契約の状態' Foreground='#777' FontSize='11'/>
+                            <TextBlock x:Name='TxtContractStatus' Foreground='#333' FontSize='11' HorizontalAlignment='Right'/></DockPanel></Border>
+                        <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock Text='証券番号' Foreground='#777' FontSize='11'/>
+                            <TextBlock x:Name='TxtPolicyNumber' Foreground='#333' FontSize='11' FontFamily='Consolas' HorizontalAlignment='Right'/></DockPanel></Border>
+                        <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock Text='契約種類' Foreground='#777' FontSize='11'/>
+                            <TextBlock x:Name='TxtContractType' Foreground='#333' FontSize='10' HorizontalAlignment='Right' TextTrimming='CharacterEllipsis' MaxWidth='300'/></DockPanel></Border>
+                        <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock Text='契約年月日' Foreground='#777' FontSize='11'/>
+                            <TextBlock x:Name='TxtContractDate' Foreground='#333' FontSize='11' HorizontalAlignment='Right'/></DockPanel></Border>
+                        <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock Text='満期年月日' Foreground='#777' FontSize='11'/>
+                            <TextBlock x:Name='TxtMaturityDate' Foreground='#333' FontSize='11' HorizontalAlignment='Right'/></DockPanel></Border>
+                        <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock Text='保険料' Foreground='#777' FontSize='11'/>
+                            <TextBlock x:Name='TxtPremium' Foreground='#333' FontSize='11' FontFamily='Consolas' HorizontalAlignment='Right'/></DockPanel></Border>
+                        <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock Text='被保険者' Foreground='#777' FontSize='11'/>
+                            <TextBlock x:Name='TxtInsuredName' Foreground='#333' FontSize='11' HorizontalAlignment='Right'/></DockPanel></Border>
+                        <DockPanel Margin='0,4,0,0'><TextBlock Text='差押権利者' Foreground='#777' FontSize='11'/>
+                            <TextBlock x:Name='TxtSeizureRights' Foreground='#333' FontSize='11' HorizontalAlignment='Right'/></DockPanel>
+                    </StackPanel></Border>
+                <Border Grid.Column='2' Background='White' BorderBrush='#E0E0E0' BorderThickness='1' CornerRadius='6' Padding='14,12' Margin='0,0,0,10'>
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock='Top' Text='&#x1F4B0; 金額情報' FontSize='13' Foreground='#E69500' FontWeight='Medium' Margin='0,0,0,8'/>
+                        <Border DockPanel.Dock='Bottom' BorderBrush='#E69500' BorderThickness='0,2,0,0' Padding='0,6,0,0' Margin='0,6,0,0'>
+                            <DockPanel><TextBlock Text='参考: 差引見込額' FontSize='11' Foreground='#777' VerticalAlignment='Center'/>
+                                <TextBlock x:Name='TxtNetValue' FontSize='13' Foreground='#E69500' FontWeight='Medium' FontFamily='Consolas' HorizontalAlignment='Right'/></DockPanel></Border>
+                        <StackPanel>
+                            <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock Text='解約返戻金' Foreground='#777' FontSize='11'/>
+                                <TextBlock x:Name='TxtSurrenderValue' Foreground='#333' FontSize='11' FontWeight='Medium' FontFamily='Consolas' HorizontalAlignment='Right'/></DockPanel></Border>
+                            <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock x:Name='LblDividend' Text='配当金' Foreground='#777' FontSize='11'/>
+                                <TextBlock x:Name='TxtDividend' Foreground='#333' FontSize='11' FontFamily='Consolas' HorizontalAlignment='Right'/></DockPanel></Border>
+                            <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock x:Name='LblLoan' Text='貸付金' Foreground='#777' FontSize='11'/>
+                                <TextBlock x:Name='TxtLoan' Foreground='#333' FontSize='11' FontFamily='Consolas' HorizontalAlignment='Right'/></DockPanel></Border>
+                            <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock x:Name='LblUnpaidPremium' Text='未払い保険料' Foreground='#777' FontSize='11'/>
+                                <TextBlock x:Name='TxtUnpaidPremium' Foreground='#333' FontSize='11' FontFamily='Consolas' HorizontalAlignment='Right'/></DockPanel></Border>
+                            <Border BorderBrush='#F0F0F0' BorderThickness='0,0,0,1' Padding='0,4'><DockPanel><TextBlock x:Name='LblUnpaidInterest' Text='未払い利息' Foreground='#777' FontSize='11'/>
+                                <TextBlock x:Name='TxtUnpaidInterest' Foreground='#333' FontSize='11' FontFamily='Consolas' HorizontalAlignment='Right'/></DockPanel></Border>
+                            <DockPanel Margin='0,4,0,0'><TextBlock x:Name='LblPrepaidPremium' Text='前払い保険料' Foreground='#777' FontSize='11'/>
+                                <TextBlock x:Name='TxtPrepaidPremium' Foreground='#333' FontSize='11' FontFamily='Consolas' HorizontalAlignment='Right'/></DockPanel>
+                        </StackPanel>
+                    </DockPanel></Border>
+            </Grid>
+            <!-- アクションボタン -->
+            <DockPanel Grid.Row='3'>
+                <Button x:Name='BtnLoadFile' DockPanel.Dock='Left' Style='{StaticResource GB}'><TextBlock Text='ファイルを読み込む'/></Button>
+                <StackPanel DockPanel.Dock='Right' Orientation='Horizontal' HorizontalAlignment='Right'>
+                    <TextBlock x:Name='GuideText' VerticalAlignment='Center' FontSize='11' Foreground='#D32F2F' Margin='0,0,12,0'/>
+                    <Button x:Name='BtnSkip' Style='{StaticResource GB}' Margin='0,0,8,0'><TextBlock Text='&#x2192; スキップ'/></Button>
+                    <Button x:Name='BtnAdd' Style='{StaticResource AB}' IsEnabled='False'><TextBlock Text='&#xFF0B; 一覧に追加'/></Button>
+                </StackPanel></DockPanel>
+        </Grid>
+        <!-- オーバーレイ -->
+        <Grid x:Name='OverlayPanel' Visibility='Collapsed' Background='#CCFFFFFF'>
+            <Grid x:Name='LoadingOverlay' Visibility='Collapsed' HorizontalAlignment='Center' VerticalAlignment='Center'>
+                <Path x:Name='SpinnerPath' Data='M 20,2 A 18,18 0 1 1 2,20'
+                      Stroke='#E69500' StrokeThickness='3'
+                      StrokeStartLineCap='Round' StrokeEndLineCap='Round'
+                      Width='40' Height='40' Stretch='None'
+                      RenderTransformOrigin='0.5,0.5'>
+                    <Path.RenderTransform><RotateTransform/></Path.RenderTransform>
+                </Path></Grid>
+            <Grid x:Name='ResultOverlay' Visibility='Collapsed' HorizontalAlignment='Center' VerticalAlignment='Center'>
+                <Border Background='White' CornerRadius='10' Padding='48,36' MinWidth='350'>
+                    <Border.Effect><DropShadowEffect BlurRadius='16' ShadowDepth='4' Opacity='0.12'/></Border.Effect>
+                    <StackPanel HorizontalAlignment='Center'>
+                        <Border x:Name='ResultIconBg' Width='64' Height='64' CornerRadius='32' Background='#E8F5ED' HorizontalAlignment='Center' Margin='0,0,0,20'>
+                            <TextBlock x:Name='ResultIcon' Text='&#x2713;' FontSize='32' HorizontalAlignment='Center' VerticalAlignment='Center' Foreground='#107C41'/></Border>
+                        <TextBlock x:Name='ResultTitle' Text='' FontSize='17' FontWeight='Medium' HorizontalAlignment='Center' Margin='0,0,0,8'/>
+                        <TextBlock x:Name='ResultDetail' FontSize='12' Foreground='#999' HorizontalAlignment='Center'/>
+                        <Button x:Name='ResultButton' Style='{StaticResource AB}' HorizontalAlignment='Center' Padding='24,10' Margin='0,24,0,0'>
+                            <TextBlock Text='次のファイルへ' FontSize='13'/></Button>
+                        <TextBlock x:Name='ResultSub' FontSize='11' Foreground='#999' HorizontalAlignment='Center' Margin='0,12,0,0'/>
+                    </StackPanel></Border></Grid>
+        </Grid>
+    </Grid>
+</DockPanel></Window>";
+        using (var reader = XmlReader.Create(new StringReader(xaml))) { return (Window)XamlReader.Load(reader); }
     }
 }
-
 // ==============================================================
 // RelayCommand
 // ==============================================================
