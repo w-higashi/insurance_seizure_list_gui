@@ -1,0 +1,83 @@
+{
+  "_README": [
+    "【生命保険差押予定一覧 作成ツール 設定ファイル】",
+    "",
+    "■ filterValue（文字列または配列）",
+    "   処理対象シートの絞り込み条件。filterCell の値に部分一致するシートが対象。",
+    "   配列で複数指定するとOR条件（いずれかに部分一致すれば対象）。",
+    "",
+    "■ 各 *Cell 項目",
+    "   Excel シート上のセルアドレスを指定する。",
+    "   Value2 バルクリードで A1:AN75 を一括取得し、セルアドレスから直接値を参照する。",
+    "",
+    "■ benefitLabelCol / benefitAmountCol / benefitStartRow / benefitEndRow",
+    "   給付金額の範囲を指定する。ラベル列と金額列の startRow〜endRow 行を走査し、",
+    "   値が存在する行のみ内部保持する（将来のUI表示用）。",
+    "",
+    "■ riderLabelCol / riderAmountCol / riderStartRow / riderEndRow",
+    "   特約の範囲を指定する。上記と同じ方式。",
+    "",
+    "■ defaultFolder（文字列・任意・GUI版のみ）",
+    "   GUI版の初期画面およびファイル選択ダイアログの初期フォルダパス。",
+    "   省略時はOSのデフォルトフォルダが使用される。"
+  ],
+  "profiles": [
+    {
+      "name": "生命保険 差押予定一覧作成",
+
+      "filterCell": "Q4",
+      "filterValue": ["現年", "滞繰"],
+
+      "addressNumberCell": "L8",
+      "staffCell": "F4",
+      "nameCell": "F11",
+      "kanaNameCell": "F10",
+      "addressCell": "B16",
+      "birthdayCell": "F13",
+      "institutionCodeCell": "F6",
+      "institutionNameCell": "L6",
+      "contractExistsCell": "G21",
+
+      "respKanaNameCell": "Z10",
+      "respNameCell": "Z11",
+      "respBirthdayCell": "Z14",
+      "respAddressCell": "V16",
+
+      "seizureRightsCell": "D40",
+      "policyNumberCell": "F44",
+      "contractStatusCell": "P44",
+      "premiumCell": "X44",
+      "paymentFrequencyCell": "AN44",
+      "contractTypeCell": "F45",
+      "contractDateCell": "P45",
+      "maturityDateCell": "P47",
+      "insuredNameCell": "K28",
+
+      "surrenderValueCell": "F62",
+      "dividendExistsCell": "V69",
+      "dividendAmountCell": "AE69",
+      "loanExistsCell": "F72",
+      "loanAmountCell": "O72",
+      "unpaidPremiumExistsCell": "F73",
+      "unpaidPremiumAmountCell": "O73",
+      "unpaidInterestExistsCell": "F74",
+      "unpaidInterestAmountCell": "O74",
+      "prepaidPremiumExistsCell": "F75",
+      "prepaidPremiumAmountCell": "O75",
+
+      "benefitLabelCol": "C",
+      "benefitAmountCol": "L",
+      "benefitStartRow": 55,
+      "benefitEndRow": 58,
+
+      "riderLabelCol": "R",
+      "riderAmountCol": "AA",
+      "riderStartRow": 55,
+      "riderEndRow": 64,
+
+      "outputFolder": "D:\\Work\\Fuchu\\2026\\insurance_seizure_list_gui\\一覧CSV",
+      "printFolder": "D:\\Work\\Fuchu\\2026\\insurance_seizure_list_gui\\プリント",
+      "defaultFolder": "D:\\Work\\Fuchu\\2026\\生保照会結果"
+    }
+  ]
+}
