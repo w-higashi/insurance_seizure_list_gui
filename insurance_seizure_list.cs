@@ -1311,32 +1311,265 @@ public class InsuranceSeizureApp : Application
         worker.RunWorkerAsync();
     }
 
-    // Phase 3 で実装: シート切替時にデータを再読み込みする
+    // シート切替時にデータを再読み込みする
+    // 現在のファイルを再度開いて、選択中のシートからデータを取得し直す
     private void ReloadSheetData()
     {
-        // TODO: Phase 3
+        if (excel == null || string.IsNullOrEmpty(currentFilePath)) return;
+
+        loadingOverlay.Visibility = Visibility.Visible;
+        resultOverlay.Visibility = Visibility.Collapsed;
+        FadeInOverlay();
+
+        var worker = new BackgroundWorker();
+        worker.DoWork += delegate(object s, DoWorkEventArgs args)
+        {
+            dynamic wb = null;
+            try
+            {
+                wb = excel.Workbooks.Open(currentFilePath, 0, true);
+                args.Result = ReadSheetData(wb, selectedSheetName);
+            }
+            finally
+            {
+                if (wb != null)
+                    try { wb.Close(false); } catch { }
+            }
+        };
+        worker.RunWorkerCompleted += delegate(object s, RunWorkerCompletedEventArgs args)
+        {
+            if (args.Error == null)
+                ApplySheet(args.Result as InsuranceData);
+            FadeOutOverlay();
+        };
+        worker.RunWorkerAsync();
     }
 
     // ==============================================================
-    // Excel読取り（Phase 3 で実装）
+    // Excel読取り
     // ==============================================================
 
-    // Phase 3 で実装: Excel COM でファイルからデータを読み取る
+    // Excel COM でファイルからデータを読み取る
+    // BackgroundWorker から呼ばれるためUIスレッドからは分離されている
     private Dictionary<string, object> ReadExcelFile(string filePath)
     {
         var result = new Dictionary<string, object>();
-        result["filePath"] = filePath;
-        result["fileName"] = System.IO.Path.GetFileName(filePath);
-        result["sheets"] = new List<string> { "(Phase 3 で実装)" };
-        result["selectedSheet"] = "(Phase 3 で実装)";
-        result["sheetData"] = new InsuranceData
+
+        // Excel COM の初回起動（アプリ生存期間中インスタンスを保持）
+        if (excel == null)
         {
-            AddressNum = "", Name = "", Staff = "", Address = "",
-            InstitutionName = "", ContractExists = "", PolicyNumber = "",
-            ContractStatus = "", ContractType = "", InsuredName = "",
-            SeizureRights = "", PaymentFrequency = ""
-        };
+            var t = Type.GetTypeFromProgID("Excel.Application");
+            if (t == null)
+                return new Dictionary<string, object> { { "error", "Excelがインストールされていません" } };
+
+            excel = Activator.CreateInstance(t);
+            excel.Visible = false;
+            excel.DisplayAlerts = false;
+
+            // マクロ無効化（msoAutomationSecurityForceDisable = 3）
+            try { excel.AutomationSecurity = 3; } catch { }
+            // 自動計算を無効化（xlCalculationManual = -4135）
+            try { excel.Calculation = -4135; } catch { }
+            // 画面更新・イベント発火を無効化
+            try { excel.ScreenUpdating = false; } catch { }
+            try { excel.EnableEvents = false; } catch { }
+        }
+
+        dynamic wb = null;
+        try
+        {
+            wb = excel.Workbooks.Open(filePath, 0, true); // 読取専用
+
+            // シートフィルタ: filterCell/filterValues で対象シートを絞り込む
+            var sheets = new List<string>();
+            for (int i = 1; i <= (int)wb.Worksheets.Count; i++)
+            {
+                dynamic ws = wb.Worksheets[i];
+                try
+                {
+                    string name = (string)ws.Name;
+                    if (!string.IsNullOrEmpty(activeProfile.FilterCell) &&
+                        activeProfile.FilterValues != null && activeProfile.FilterValues.Length > 0)
+                    {
+                        try
+                        {
+                            string cellValue = Convert.ToString(ws.Range[activeProfile.FilterCell].Value2 ?? "");
+                            foreach (var fv in activeProfile.FilterValues)
+                            {
+                                if (cellValue.IndexOf(fv, StringComparison.OrdinalIgnoreCase) >= 0)
+                                { sheets.Add(name); break; }
+                            }
+                        }
+                        catch { }
+                    }
+                    else
+                    {
+                        // フィルタ未設定時は Visible シートを全て対象
+                        if ((int)ws.Visible == -1) sheets.Add(name);
+                    }
+                }
+                catch { }
+            }
+
+            result["sheets"] = sheets;
+            result["filePath"] = filePath;
+            result["fileName"] = System.IO.Path.GetFileName(filePath);
+
+            if (sheets.Count == 0)
+            {
+                result["noSheet"] = true;
+                try { wb.Close(false); } catch { }
+                wb = null;
+                return result;
+            }
+
+            result["selectedSheet"] = sheets[0];
+
+            try
+            {
+                result["sheetData"] = ReadSheetData(wb, sheets[0]);
+            }
+            catch (Exception rex)
+            {
+                result["error"] = "シートデータの読取りに失敗: " + rex.Message;
+            }
+        }
+        catch (Exception ex) { result["error"] = ex.Message; }
+        finally
+        {
+            if (wb != null)
+                try { wb.Close(false); } catch { }
+        }
         return result;
+    }
+
+    // 指定シートから全情報を読み取る
+    // A1:AN75 を1回の COM 呼出しで一括取得し、BulkCellByAddress で各セルにアクセス
+    private InsuranceData ReadSheetData(dynamic wb, string sheetName)
+    {
+        dynamic ws = wb.Worksheets[sheetName];
+        var d = new InsuranceData();
+
+        // シート全体を1回の COM 呼出しで一括取得（全セルアドレスが A1:AN75 内に収まる）
+        object[,] bulk = null;
+        try
+        {
+            object raw = ws.Range["A1", BULK_READ_END].Value2;
+            bulk = raw as object[,];
+        }
+        catch { }
+
+        if (bulk == null) return d;
+
+        // ── 基本情報 ──
+        d.AddressNum = BusinessLogic.BulkCellByAddress(bulk, activeProfile.AddressNumberCell);
+        d.Name = BusinessLogic.BulkCellByAddress(bulk, activeProfile.NameCell);
+        d.KanaName = BusinessLogic.BulkCellByAddress(bulk, activeProfile.KanaNameCell);
+        d.Staff = BusinessLogic.BulkCellByAddress(bulk, activeProfile.StaffCell);
+        d.Address = BusinessLogic.BulkCellByAddress(bulk, activeProfile.AddressCell);
+        d.Birthday = BusinessLogic.BulkCellByAddress(bulk, activeProfile.BirthdayCell);
+        d.InstitutionCode = BusinessLogic.BulkCellByAddress(bulk, activeProfile.InstitutionCodeCell);
+        d.ContractExists = BusinessLogic.BulkCellByAddress(bulk, activeProfile.ContractExistsCell);
+
+        // 金融機関名の取得とマッピング補正
+        string institution = BusinessLogic.BulkCellByAddress(bulk, activeProfile.InstitutionNameCell).Trim();
+        if (institutionNameMapping != null)
+        {
+            string normalized = BusinessLogic.ToFullWidth(institution);
+            foreach (var kv in institutionNameMapping)
+            {
+                if (BusinessLogic.ToFullWidth(kv.Key) == normalized)
+                { institution = kv.Value; break; }
+            }
+        }
+        d.InstitutionName = institution;
+
+        // ── 金融機関側情報 ──
+        d.RespKanaName = BusinessLogic.BulkCellByAddress(bulk, activeProfile.RespKanaNameCell);
+        d.RespName = BusinessLogic.BulkCellByAddress(bulk, activeProfile.RespNameCell);
+        d.RespBirthday = BusinessLogic.BulkCellByAddress(bulk, activeProfile.RespBirthdayCell);
+        d.RespAddress = BusinessLogic.BulkCellByAddress(bulk, activeProfile.RespAddressCell);
+
+        // ── 契約情報 ──
+        d.SeizureRights = BusinessLogic.BulkCellByAddress(bulk, activeProfile.SeizureRightsCell);
+        d.PolicyNumber = BusinessLogic.BulkCellByAddress(bulk, activeProfile.PolicyNumberCell);
+        d.ContractStatus = BusinessLogic.BulkCellByAddress(bulk, activeProfile.ContractStatusCell);
+        d.ContractType = BusinessLogic.BulkCellByAddress(bulk, activeProfile.ContractTypeCell);
+        d.InsuredName = BusinessLogic.BulkCellByAddress(bulk, activeProfile.InsuredNameCell);
+        d.PaymentFrequency = BusinessLogic.BulkCellByAddress(bulk, activeProfile.PaymentFrequencyCell);
+
+        // 保険料（数値 + 払込区分から表示文字列を生成）
+        d.PremiumValue = BusinessLogic.ParseAmount(
+            BusinessLogic.BulkCellRawByAddress(bulk, activeProfile.PremiumCell));
+        d.PremiumDisplay = BusinessLogic.FormatPremiumDisplay(d.PremiumValue, d.PaymentFrequency);
+
+        // 契約年月日（Excelシリアル値または文字列に対応）
+        var contractDateRaw = BusinessLogic.BulkCellRawByAddress(bulk, activeProfile.ContractDateCell);
+        d.ContractDateParsed = BusinessLogic.ParseExcelDate(contractDateRaw);
+        d.ContractDate = d.ContractDateParsed.HasValue
+            ? d.ContractDateParsed.Value.ToString("yyyy/MM/dd")
+            : Convert.ToString(contractDateRaw ?? "");
+
+        // 満期年月日
+        var maturityDateRaw = BusinessLogic.BulkCellRawByAddress(bulk, activeProfile.MaturityDateCell);
+        var maturityParsed = BusinessLogic.ParseExcelDate(maturityDateRaw);
+        d.MaturityDate = maturityParsed.HasValue
+            ? maturityParsed.Value.ToString("yyyy/MM/dd")
+            : Convert.ToString(maturityDateRaw ?? "");
+
+        // ── 金額情報 ──
+        d.SurrenderValue = BusinessLogic.ParseAmount(
+            BusinessLogic.BulkCellRawByAddress(bulk, activeProfile.SurrenderValueCell));
+        d.DividendExists = BusinessLogic.BulkCellByAddress(bulk, activeProfile.DividendExistsCell);
+        d.DividendAmount = BusinessLogic.ParseAmount(
+            BusinessLogic.BulkCellRawByAddress(bulk, activeProfile.DividendAmountCell));
+        d.LoanExists = BusinessLogic.BulkCellByAddress(bulk, activeProfile.LoanExistsCell);
+        d.LoanAmount = BusinessLogic.ParseAmount(
+            BusinessLogic.BulkCellRawByAddress(bulk, activeProfile.LoanAmountCell));
+        d.UnpaidPremiumExists = BusinessLogic.BulkCellByAddress(bulk, activeProfile.UnpaidPremiumExistsCell);
+        d.UnpaidPremiumAmount = BusinessLogic.ParseAmount(
+            BusinessLogic.BulkCellRawByAddress(bulk, activeProfile.UnpaidPremiumAmountCell));
+        d.UnpaidInterestExists = BusinessLogic.BulkCellByAddress(bulk, activeProfile.UnpaidInterestExistsCell);
+        d.UnpaidInterestAmount = BusinessLogic.ParseAmount(
+            BusinessLogic.BulkCellRawByAddress(bulk, activeProfile.UnpaidInterestAmountCell));
+        d.PrepaidPremiumExists = BusinessLogic.BulkCellByAddress(bulk, activeProfile.PrepaidPremiumExistsCell);
+        d.PrepaidPremiumAmount = BusinessLogic.ParseAmount(
+            BusinessLogic.BulkCellRawByAddress(bulk, activeProfile.PrepaidPremiumAmountCell));
+
+        // 差引見込額
+        d.NetValue = BusinessLogic.CalcNetValue(d);
+
+        // ── 給付金額（内部保持、UI非表示） ──
+        if (!string.IsNullOrEmpty(activeProfile.BenefitLabelCol) &&
+            !string.IsNullOrEmpty(activeProfile.BenefitAmountCol))
+        {
+            int lblCol = BusinessLogic.ColToIndex(activeProfile.BenefitLabelCol);
+            int amtCol = BusinessLogic.ColToIndex(activeProfile.BenefitAmountCol);
+            for (int r = activeProfile.BenefitStartRow; r <= activeProfile.BenefitEndRow; r++)
+            {
+                string label = BusinessLogic.BulkCell(bulk, r, lblCol).Trim();
+                if (!string.IsNullOrEmpty(label))
+                    d.Benefits.Add(new[] { label,
+                        BusinessLogic.FormatBalance(BusinessLogic.BulkCellRaw(bulk, r, amtCol)) });
+            }
+        }
+
+        // ── 特約（内部保持、UI非表示） ──
+        if (!string.IsNullOrEmpty(activeProfile.RiderLabelCol) &&
+            !string.IsNullOrEmpty(activeProfile.RiderAmountCol))
+        {
+            int lblCol = BusinessLogic.ColToIndex(activeProfile.RiderLabelCol);
+            int amtCol = BusinessLogic.ColToIndex(activeProfile.RiderAmountCol);
+            for (int r = activeProfile.RiderStartRow; r <= activeProfile.RiderEndRow; r++)
+            {
+                string label = BusinessLogic.BulkCell(bulk, r, lblCol).Trim();
+                if (!string.IsNullOrEmpty(label))
+                    d.Riders.Add(new[] { label,
+                        BusinessLogic.FormatBalance(BusinessLogic.BulkCellRaw(bulk, r, amtCol)) });
+            }
+        }
+
+        return d;
     }
 
     // フォームにデータ反映
@@ -1347,6 +1580,16 @@ public class InsuranceSeizureApp : Application
         var sheets = data["sheets"] as List<string>;
         sheetCombo.Items.Clear();
         if (sheets != null) foreach (var s in sheets) sheetCombo.Items.Add(s);
+        if (data.ContainsKey("noSheet") && (bool)data["noSheet"])
+        {
+            // 対象シートなし → フォームをクリアしてガイドテキストで通知
+            ApplySheet(new InsuranceData());
+            guideText.Text = "対象シートがありません（フィルタ条件: " +
+                (activeProfile.FilterValues != null ? string.Join(", ", activeProfile.FilterValues) : "") + "）";
+            btnAdd.IsEnabled = false;
+            return;
+        }
+        // 初期選択時は SelectionChanged による ReloadSheetData を抑止
         suppressSheetChange = true;
         if (sheetCombo.Items.Count > 0) sheetCombo.SelectedIndex = 0;
         suppressSheetChange = false;
