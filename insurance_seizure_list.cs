@@ -1754,6 +1754,10 @@ public class InsuranceSeizureApp : Application
             { deliveryError.Visibility = Visibility.Visible; return; }
         }
 
+        // ボタンを無効化して二重実行を防止
+        btnAdd.IsEnabled = false;
+        btnSkip.IsEnabled = false;
+
         // オーバーレイ表示（処理中スピナー）
         loadingOverlay.Visibility = Visibility.Visible;
         resultOverlay.Visibility = Visibility.Collapsed;
