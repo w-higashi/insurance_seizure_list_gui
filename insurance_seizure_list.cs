@@ -1720,6 +1720,7 @@ public class InsuranceSeizureApp : Application
         resultButton.Content = last ? "完了" : "次のファイルへ \u2192";
         resultSub.Text = last ? "" : ((currentFileIndex + 2) + " / " + fileEntries.Count + " 件目へ進みます");
         resultSub.Visibility = last ? Visibility.Collapsed : Visibility.Visible;
+        resultButton.Focus();
     }
 
     private void ProceedToNext()
