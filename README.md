@@ -92,6 +92,7 @@ deposit_seizure_list（ティール #00897B）、file_search（青 #005FB8）と
 ### 3.3 コマンドライン引数起動
 - file_search.exe の「差押リストに追加」から呼び出される。
 - 引数で渡されたファイルパスを処理キューに追加する。
+- `--log=` プレフィックス付きの引数は差押登録ログの出力先パスとして分離する（ファイルパスには追加しない）。
 - `isFromFileSearch = true` となり、全ファイル処理完了後にアプリを自動クローズする。
 
 ---
@@ -306,10 +307,17 @@ deposit_seizure_list（ティール #00897B）、file_search（青 #005FB8）と
 ### 13.1 呼び出し方式
 - file_search.cs の AddToSeizureList メソッドが insurance_seizure_list.exe を子プロセスとして起動する。
 - 引数にファイルパスを渡す（複数ファイルの場合はスペース区切り）。
-- UseShellExecute = true で直接起動。
+- `--log=` 引数で差押登録ログファイルのパスを渡す。
+- UseShellExecute = false、EnableRaisingEvents = true で起動し、Process.Exited でログ再読み込みを行う。
 
 ### 13.2 設定
 - file_search_config.json に生命保険版の exe パスを設定する（設定項目名は要検討）。
+
+### 13.3 差押登録ログ
+- 登録完了時（`result["status"] == "ok"`）に、`--log=` で渡されたパスに JSON ログを書き出す。
+- `--log=` 引数がない場合（単体起動時）はログ書き出しをスキップする。
+- 書き出し項目: 宛名番号、氏名、保険会社名、執行日（yyyy-MM-dd）、文書番号、登録日時（ISO）。
+- 排他ロック + リトライ3回。全体を try/catch で囲み、失敗してもメイン処理に影響しない。
 
 ---
 
