@@ -122,10 +122,12 @@ public class ProfileConfig
 public class AppConfig
 {
     public List<ProfileConfig> Profiles { get; set; }
+    public string CsvFileName { get; set; }              // 出力先CSVファイル名（年度切替用・必須）
 
     public AppConfig()
     {
         Profiles = new List<ProfileConfig>();
+        CsvFileName = null;
     }
 }
 
@@ -389,6 +391,7 @@ public static class ConfigLoader
         if (!File.Exists(configPath)) return config;
 
         var json = File.ReadAllText(configPath, Encoding.UTF8);
+        config.CsvFileName = JsonHelper.GetString(json, "csvFileName");
 
         foreach (var profileJson in JsonHelper.GetObjectArray(json, "profiles"))
         {
@@ -852,7 +855,7 @@ public class InsuranceSeizureApp : Application
     private const int CSV_WRITE_MAX_RETRY = 5;
     private const int CSV_WRITE_RETRY_INTERVAL_MS = 500;
     private const int MAX_PATH = 260;
-    private const string CSV_FILENAME = "生命保険差押予定一覧.csv";
+    // CSV ファイル名は config.CsvFileName（AppConfig）から取得（旧 CSV_FILENAME 定数は v1.2 で config 化）
     private const string CSV_HEADER = "登録日時,宛名番号,氏名,職員名,執行日,住民票住所,届出住所,"
         + "保険会社名,証券番号,契約種類,"
         + "差押文言1,差押文言2,差押文言3,差押文言4,差押文言5,差押文言6,"
@@ -938,7 +941,9 @@ public class InsuranceSeizureApp : Application
         activeProfile = config.Profiles[0];
 
         // --- プロファイルバリデーション ---
+        // csvFileName は AppConfig レベル項目だが、UI 文言統一のため同じリストに集約
         var ve = new List<string>();
+        if (string.IsNullOrWhiteSpace(config.CsvFileName)) ve.Add("csvFileName が未設定です");
         if (string.IsNullOrWhiteSpace(activeProfile.AddressNumberCell)) ve.Add("addressNumberCell が未設定です");
         if (string.IsNullOrWhiteSpace(activeProfile.NameCell)) ve.Add("nameCell が未設定です");
         if (string.IsNullOrWhiteSpace(activeProfile.StaffCell)) ve.Add("staffCell が未設定です");
@@ -1930,7 +1935,7 @@ public class InsuranceSeizureApp : Application
         string csvLine = string.Join(",", csvFields.Select(f => BusinessLogic.CsvEscape(f)));
 
         // 4. CSV追記
-        string csvPath = System.IO.Path.Combine(activeProfile.OutputFolder, CSV_FILENAME);
+        string csvPath = System.IO.Path.Combine(activeProfile.OutputFolder, config.CsvFileName);
         if (!WriteCsvLine(csvPath, csvLine))
         {
             RollbackDocNumber();
